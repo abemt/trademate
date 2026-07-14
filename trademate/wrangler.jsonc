@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "trademate",
+  "main": "worker/index.ts",
+  "compatibility_date": "2025-05-05",
+  "assets": {
+    "directory": "./dist/client",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "trademate-db",
+      "database_id": "ea9d1f0d-4c5a-470d-9aed-8d44c08cbcad",
+      "migrations_dir": "migrations"
+    }
+  ],
+  // Custom domain — activates on deploy once the abemt.dev zone is active in Cloudflare.
+  "routes": [{ "pattern": "trademate.abemt.dev", "custom_domain": true }],
+  "workers_dev": true,
+  // Screenshots are stored as D1 blobs (see migrations/0006) — R2 needs dashboard
+  // activation + billing info, which the free build avoids.
+  // 05:00 UTC weekdays = 08:00 Addis (pre-London briefing) · news scan every 20 min
+  "triggers": { "crons": ["0 5 * * 1-5", "*/20 * * * *"] },
+  "observability": { "enabled": true }
+}

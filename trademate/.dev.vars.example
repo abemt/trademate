@@ -1,0 +1,6 @@
+# Copy to .dev.vars for local development.
+PASSCODE=trademate-dev
+JWT_SECRET=dev-only-secret-change-me-0123456789abcdef
+GEMINI_API_KEY=your-google-ai-studio-key
+GROQ_API_KEY=your-groq-key
+TWELVEDATA_API_KEY=your-twelvedata-key

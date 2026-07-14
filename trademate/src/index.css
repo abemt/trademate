@@ -1,0 +1,107 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink-950: #07090c;
+  --color-ink-900: #0b0e13;
+  --color-ink-800: #12161d;
+  --color-ink-700: #1a1f29;
+  --color-ink-600: #232b3a;
+  --color-ink-500: #3d4557;
+  --color-ink-400: #5b6579;
+  --color-ink-300: #8b95a9;
+  --color-ink-200: #b9c1d0;
+  --color-ink-100: #d7dce6;
+  --color-gold-100: #f8ecd0;
+  --color-gold-200: #f5e2b1;
+  --color-gold-300: #f4d998;
+  --color-gold-400: #e8bf5b;
+  --color-gold-500: #d9a83f;
+  --color-gold-600: #b8862e;
+  --color-up: #34d399;
+  --color-down: #f87171;
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/* Page-level vars live outside @theme so they stay dynamic (not inlined). */
+:root {
+  --page-bg: #07090c;
+  --page-text: #b9c1d0;
+}
+
+/* Light theme — re-maps the same tokens, so every component follows. */
+[data-theme="light"] {
+  --page-bg: #eef0f4;
+  --page-text: #2a3242;
+  --color-ink-950: #eef0f4;
+  --color-ink-900: #ffffff;
+  --color-ink-800: #f1f3f7;
+  --color-ink-700: #e3e7ee;
+  --color-ink-600: #c9d0dc;
+  --color-ink-500: #a3adbf;
+  --color-ink-400: #667085;
+  --color-ink-300: #4a5468;
+  --color-ink-200: #2a3242;
+  --color-ink-100: #1b2333;
+  --color-white: #101623; /* "white" text becomes near-black on light */
+  --color-gold-100: #6d5420;
+  --color-gold-200: #5d481c;
+  --color-gold-300: #7d5d1f;
+  --color-gold-400: #9c7427;
+  --color-gold-500: #b8862e;
+  --color-gold-600: #96702a;
+  --color-up: #0f9d6c;
+  --color-down: #dc4444;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(1100px 520px at 50% -12%, rgb(232 191 91 / 0.07), transparent 60%),
+    var(--page-bg);
+  color: var(--page-text);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: none;
+  transition: background-color 0.2s ease;
+}
+
+::selection {
+  background: rgb(232 191 91 / 0.25);
+}
+
+/* Fail-open enter transition: if animation frames are throttled (backgrounded
+   PWA, headless), content simply shows in its natural, fully-visible state. */
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.animate-enter {
+  animation: enter 0.18s ease-out;
+}
+
+@keyframes sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+.animate-sheet-in {
+  animation: sheet-in 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
