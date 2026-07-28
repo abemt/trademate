@@ -91,6 +91,15 @@ export function fmtUsd(v: number): string {
   return `${sign}$${Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
+/** Live account balance: starting balance + every closed trade's P&L from the journal. */
+export function currentBalance(startingBalance: number, trades: Trade[]): number {
+  return trades.reduce(
+    (bal, t) =>
+      !t.deleted && t.status === "closed" && t.pnl_usd !== null ? bal + t.pnl_usd : bal,
+    startingBalance,
+  );
+}
+
 export function fmtR(v: number): string {
   const r = Math.round(v * 100) / 100;
   return `${r > 0 ? "+" : ""}${r}R`;

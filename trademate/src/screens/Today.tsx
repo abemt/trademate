@@ -16,7 +16,7 @@ import {
   NewsWatchCard,
 } from "../components/TodayCards";
 import { useApp } from "../lib/store";
-import { computeStats, localDateKey } from "../lib/trades";
+import { computeStats, currentBalance, localDateKey } from "../lib/trades";
 import {
   SESSIONS,
   formatCountdown,
@@ -168,7 +168,8 @@ const RISK_CHOICES = [0.5, 1.0];
 
 function RiskCalc() {
   const profile = useApp((s) => s.profile);
-  const accountSize = profile?.account_size ?? 10_000;
+  const trades = useApp((s) => s.trades);
+  const accountSize = currentBalance(profile?.account_size ?? 10_000, trades);
   const [riskPct, setRiskPct] = useState(0.5);
   const [slPips, setSlPips] = useState(75);
 
@@ -192,7 +193,7 @@ function RiskCalc() {
           </button>
         ))}
         <span className="ml-auto self-center text-xs text-ink-400">
-          ${accountSize.toLocaleString()} account
+          ${accountSize.toLocaleString(undefined, { maximumFractionDigits: 0 })} balance
         </span>
       </div>
 

@@ -10,6 +10,7 @@ import {
   TIMEFRAMES,
   TRADE_SESSIONS,
   TRIGGERS,
+  currentBalance,
   currentSessionId,
   type Trade,
 } from "../lib/trades";
@@ -27,7 +28,8 @@ const R_CHIPS = [-1, -0.5, 0, 1, 1.5, 2, 3];
 function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open">) {
   const profile = useApp((s) => s.profile);
   const saveTrade = useApp((s) => s.saveTrade);
-  const accountSize = profile?.account_size ?? 10_000;
+  const trades = useApp((s) => s.trades);
+  const accountSize = currentBalance(profile?.account_size ?? 10_000, trades);
 
   const base = existing ?? prefill ?? null;
   const initialSetup = base?.setup_type ?? null;

@@ -22,9 +22,12 @@ interface AIEnv {
   GROQ_API_KEY?: string;
 }
 
-const GEMINI_MODEL = "gemini-flash-latest";
-const GROQ_TEXT_MODEL = "llama-3.3-70b-versatile";
-const GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
+// Pinned stable — the "latest" alias hot-swaps to new major versions with breaking
+// generationConfig changes (that's how thinkingBudget started returning HTTP 400).
+const GEMINI_MODEL = "gemini-3.6-flash";
+// Groq decommissioned llama-3.3-70b + llama-4-scout in mid-2026 (HTTP 404).
+const GROQ_TEXT_MODEL = "openai/gpt-oss-120b";
+const GROQ_VISION_MODEL = "qwen/qwen3.6-27b";
 
 export async function callAI(env: AIEnv, messages: AIMessage[], opts: AIOptions = {}): Promise<string> {
   const errors: string[] = [];
@@ -69,10 +72,12 @@ async function callGemini(key: string, messages: AIMessage[], opts: AIOptions): 
         contents,
         generationConfig: {
           temperature: opts.temperature ?? 0.7,
-          maxOutputTokens: opts.maxTokens ?? 2048,
-          // Flash models spend the token budget on hidden "thinking" by default,
-          // which truncates visible replies. Chat/analysis don't need it.
-          thinkingConfig: { thinkingBudget: 0 },
+          // Gemini 3 counts hidden thinking tokens against the output budget,
+          // so leave headroom above the visible-reply budget callers ask for.
+          maxOutputTokens: (opts.maxTokens ?? 2048) + 1024,
+          // Gemini 3 dropped thinkingBudget (INVALID_ARGUMENT); thinkingLevel
+          // "low" is the closest to "don't overthink" and is valid on all 3.x.
+          thinkingConfig: { thinkingLevel: "low" },
           ...(opts.json ? { responseMimeType: "application/json" } : {}),
         },
       }),

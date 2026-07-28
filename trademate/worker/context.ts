@@ -106,6 +106,19 @@ export async function traderContext(env: Env): Promise<string> {
   const tz = String(profile.timezone ?? "Africa/Addis_Ababa");
   const today = localDate(tz);
 
+  // Live balance = starting balance + net P&L of ALL closed trades (not just recent).
+  let netPnl = 0;
+  try {
+    const r = await env.DB.prepare(
+      "SELECT COALESCE(SUM(pnl_usd), 0) AS net FROM trades WHERE deleted = 0 AND status = 'closed' AND pnl_usd IS NOT NULL",
+    ).first<{ net: number }>();
+    netPnl = r?.net ?? 0;
+  } catch {
+    // trades table may not exist yet
+  }
+  const startBalance = Number(profile.account_size ?? 0);
+  const liveBalance = Math.round(startBalance + netPnl);
+
   const todayCount = trades.filter(
     (t) => localDate(tz, new Date(t.opened_at)) === today,
   ).length;
@@ -143,7 +156,7 @@ export async function traderContext(env: Env): Promise<string> {
 
   return `TRADER CONTEXT (live from his journal, newest first)
 Name: ${profile.trader_name} · Timezone: ${tz} · Instrument: ${profile.instrument}
-Account: ${profile.account_label} ($${profile.account_size}), eval phase ${profile.eval_phase}
+Account: ${profile.account_label} (started $${startBalance}, live balance $${liveBalance}), eval phase ${profile.eval_phase}
 His rules: risk ${profile.risk_pct_min}-${profile.risk_pct_max}%/trade, SL ${profile.sl_pips_min}-${profile.sl_pips_max} pips, MAX ${profile.max_trades_per_day} trades/day
 Prop limits: daily loss $${profile.prop_daily_loss_usd}, max drawdown $${profile.prop_max_drawdown_usd}, target $${profile.prop_profit_target_usd}
 Known weaknesses: ${profile.weaknesses}

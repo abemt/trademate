@@ -4,10 +4,12 @@ import { Sheet } from "./Sheet";
 import { api } from "../lib/api";
 import { pushState, sendTestPush, subscribePush, type PushState } from "../lib/push";
 import { useApp } from "../lib/store";
+import { currentBalance } from "../lib/trades";
 
 export function SettingsSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const profile = useApp((s) => s.profile);
   const loadProfile = useApp((s) => s.loadProfile);
+  const trades = useApp((s) => s.trades);
 
   const [name, setName] = useState("");
   const [balance, setBalance] = useState("");
@@ -86,7 +88,7 @@ export function SettingsSheet({ open, onClose }: { open: boolean; onClose: () =>
         </div>
 
         <div>
-          <FieldLabel>Account balance ($) — keep in sync with your broker</FieldLabel>
+          <FieldLabel>Starting balance ($) — wins &amp; losses update the live balance for you</FieldLabel>
           <input
             type="text"
             inputMode="decimal"
@@ -94,6 +96,17 @@ export function SettingsSheet({ open, onClose }: { open: boolean; onClose: () =>
             onChange={(e) => setBalance(e.target.value)}
             className="w-full rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white outline-none focus:border-gold-500/60"
           />
+          <p className="mt-1.5 text-xs text-ink-400">
+            Live balance:{" "}
+            <span className="font-semibold text-white">
+              $
+              {currentBalance(
+                Number.parseFloat(balance) || profile?.account_size || 0,
+                trades,
+              ).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+            </span>{" "}
+            · starting balance + closed P&amp;L from your journal
+          </p>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
