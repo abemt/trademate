@@ -179,7 +179,11 @@ function RiskCalc() {
   const [slPips, setSlPips] = useState(75);
 
   const riskUsd = (accountSize * riskPct) / 100;
-  const lots = Math.floor((riskUsd / (slPips * 10)) * 100) / 100; // XAUUSD: $10/pip per lot
+  const idealLots = Math.floor((riskUsd / (slPips * 10)) * 100) / 100; // XAUUSD: $10/pip per lot
+  const belowMin = idealLots < 0.01;
+  // Broker minimum is 0.01 lots — on tiny accounts that IS the position, so show its real risk.
+  const minLotRiskUsd = 0.01 * slPips * 10;
+  const minLotRiskPct = accountSize > 0 ? (minLotRiskUsd / accountSize) * 100 : 0;
 
   return (
     <Card title="Risk Guard" icon={<IconShield />} badge={active?.label ?? profile?.account_label ?? "account"}>
@@ -218,13 +222,27 @@ function RiskCalc() {
       <div className="mt-3 grid grid-cols-2 gap-2">
         <div className="rounded-xl bg-ink-800/70 p-3 text-center">
           <p className="text-[10px] uppercase tracking-wider text-ink-400">Position size</p>
-          <p className="text-xl font-bold text-gold-300">{lots.toFixed(2)} lots</p>
+          <p className={`text-xl font-bold ${belowMin ? "text-down" : "text-gold-300"}`}>
+            {belowMin ? "0.01*" : idealLots.toFixed(2)} lots
+          </p>
         </div>
         <div className="rounded-xl bg-ink-800/70 p-3 text-center">
-          <p className="text-[10px] uppercase tracking-wider text-ink-400">Risk</p>
-          <p className="text-xl font-bold text-white">${riskUsd.toFixed(0)}</p>
+          <p className="text-[10px] uppercase tracking-wider text-ink-400">
+            {belowMin ? "Real risk at 0.01" : "Risk"}
+          </p>
+          <p className={`text-xl font-bold ${belowMin ? "text-down" : "text-white"}`}>
+            ${belowMin ? minLotRiskUsd.toFixed(0) : riskUsd.toFixed(2)}
+          </p>
         </div>
       </div>
+      {belowMin && (
+        <p className="mt-2 rounded-xl border border-down/30 bg-down/5 p-2.5 text-xs leading-relaxed text-down">
+          *This account is below minimum operating size: {riskPct}% risk would need{" "}
+          {idealLots.toFixed(3)} lots, but the broker minimum 0.01 risks ${minLotRiskUsd.toFixed(0)} ={" "}
+          {minLotRiskPct.toFixed(0)}% of the account at this stop. There is no compliant size — that's
+          math, not opinion. Per your contract: this account buys reps, not growth.
+        </p>
+      )}
     </Card>
   );
 }
@@ -303,6 +321,9 @@ function PropGuard() {
 
 export function Today() {
   const now = useNow();
+  const accounts = useApp((s) => s.accounts);
+  const active = accounts.find((a) => a.active === 1 && a.archived === 0) ?? null;
+  const isProp = active ? active.type === "prop_eval" || active.type === "prop_funded" : false;
   return (
     <div className="space-y-4 lg:columns-2 lg:gap-4 lg:space-y-0 lg:[&>*]:mb-4 lg:[&>*]:break-inside-avoid">
       <Greeting now={now} />
@@ -312,7 +333,7 @@ export function Today() {
       <TradeTokens />
       <SessionClock now={now} />
       <RiskCalc />
-      <PropGuard />
+      {isProp && <PropGuard />}
       <NewsWatchCard />
       <DisciplineCard />
     </div>
