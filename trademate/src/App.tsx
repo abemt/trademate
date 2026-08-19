@@ -15,6 +15,8 @@ import { Today } from "./screens/Today";
 
 function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
   const profile = useApp((s) => s.profile);
+  const accounts = useApp((s) => s.accounts);
+  const active = accounts.find((a) => a.active === 1 && a.archived === 0) ?? null;
   const [theme, setTheme] = useState<Theme>(() => currentTheme());
 
   function toggleTheme() {
@@ -26,14 +28,14 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
   return (
     <header className="sticky top-0 z-20 border-b border-white/5 bg-ink-950/85 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
       <div className="mx-auto flex max-w-lg items-center gap-2.5 px-4 py-3 lg:max-w-6xl">
-        <img src="/icon.svg" alt="" className="h-7 w-7 rounded-lg" />
-        <p className="text-base font-bold text-white">
-          Trade<span className="text-gold-400">Mate</span>
+        <img src="/icon.svg" alt="" className="h-7 w-7 rounded-lg lg:hidden" />
+        <p className="text-base font-bold text-white lg:hidden">
+          Trade<span className="text-gold-500">Mate</span>
         </p>
         <div className="ml-auto flex items-center gap-2">
-          {profile && (
-            <span className="hidden rounded-full border border-white/10 bg-ink-800 px-2.5 py-1 text-[10px] font-medium text-ink-300 sm:inline">
-              {profile.account_label}
+          {(active || profile) && (
+            <span className="rounded-full border border-gold-500/30 bg-gold-500/8 px-2.5 py-1 text-[10px] font-semibold text-gold-400">
+              {active?.label ?? profile?.account_label}
             </span>
           )}
           <button

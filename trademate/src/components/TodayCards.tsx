@@ -476,6 +476,7 @@ export function NewsWatchCard() {
   const [notifOk, setNotifOk] = useState(
     typeof Notification !== "undefined" && Notification.permission === "granted",
   );
+  const cycleRef = useRef<(scan: boolean) => Promise<void>>(async () => {});
 
   useEffect(() => {
     let cancelled = false;
@@ -508,6 +509,7 @@ export function NewsWatchCard() {
         if (!cancelled) setScanning(false);
       }
     }
+    cycleRef.current = cycle;
     void cycle(true);
     const id = setInterval(() => void cycle(true), 5 * 60_000);
     return () => {
@@ -518,6 +520,14 @@ export function NewsWatchCard() {
 
   return (
     <Card title="News watch" icon={<IconNews />} badge={scanning ? "scanning…" : "every 5 min"}>
+      <button
+        type="button"
+        onClick={() => void cycleRef.current(true)}
+        disabled={scanning}
+        className="mb-3 w-full rounded-lg border border-white/10 bg-ink-800 py-2 text-xs font-semibold text-ink-300 transition hover:text-gold-400 disabled:opacity-50"
+      >
+        {scanning ? "Scanning feeds…" : "↻ Refresh now — @marketfeed · @Forex_LiveStream · Bloomberg"}
+      </button>
       {typeof Notification !== "undefined" && Notification.permission === "default" && (
         <button
           type="button"
