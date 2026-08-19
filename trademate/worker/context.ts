@@ -7,6 +7,8 @@ export interface Env {
   GEMINI_API_KEY?: string;
   GROQ_API_KEY?: string;
   TWELVEDATA_API_KEY?: string;
+  GITHUB_MODELS_TOKEN?: string;
+  TELEGRAM_NEWS_CHANNEL?: string;
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_JWK?: string;
 }

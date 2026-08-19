@@ -16,6 +16,10 @@
       "migrations_dir": "migrations"
     }
   ],
+  "vars": {
+    // Public Telegram channel scraped via t.me/s for the live news feed.
+    "TELEGRAM_NEWS_CHANNEL": "marketfeed"
+  },
   // Custom domain — activates on deploy once the abemt.dev zone is active in Cloudflare.
   "routes": [{ "pattern": "trademate.abemt.dev", "custom_domain": true }],
   "workers_dev": true,

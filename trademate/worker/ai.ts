@@ -1,4 +1,4 @@
-/** AI provider chain: Gemini (free tier, vision) → Groq (fast fallback, vision). */
+/** AI provider chain: Gemini (free tier, vision) → Groq (fast fallback, vision) → GitHub Models (free PAT tier, last resort). */
 
 export interface AIImage {
   mime: string;
@@ -20,6 +20,7 @@ export interface AIOptions {
 interface AIEnv {
   GEMINI_API_KEY?: string;
   GROQ_API_KEY?: string;
+  GITHUB_MODELS_TOKEN?: string;
 }
 
 // Pinned stable — the "latest" alias hot-swaps to new major versions with breaking
@@ -28,6 +29,8 @@ const GEMINI_MODEL = "gemini-3.6-flash";
 // Groq decommissioned llama-3.3-70b + llama-4-scout in mid-2026 (HTTP 404).
 const GROQ_TEXT_MODEL = "openai/gpt-oss-120b";
 const GROQ_VISION_MODEL = "qwen/qwen3.6-27b";
+// GitHub Models free tier — OpenAI-compatible, tight daily rate limits, fine as last resort.
+const GITHUB_MODEL = "openai/gpt-4.1";
 
 export async function callAI(env: AIEnv, messages: AIMessage[], opts: AIOptions = {}): Promise<string> {
   const errors: string[] = [];
@@ -43,6 +46,13 @@ export async function callAI(env: AIEnv, messages: AIMessage[], opts: AIOptions 
       return await callGroq(env.GROQ_API_KEY, messages, opts);
     } catch (e) {
       errors.push(`groq: ${String(e).slice(0, 200)}`);
+    }
+  }
+  if (env.GITHUB_MODELS_TOKEN) {
+    try {
+      return await callGithubModels(env.GITHUB_MODELS_TOKEN, messages, opts);
+    } catch (e) {
+      errors.push(`github: ${String(e).slice(0, 200)}`);
     }
   }
   throw new Error(errors.length ? errors.join(" | ") : "No AI provider configured");
@@ -124,6 +134,46 @@ async function callGroq(key: string, messages: AIMessage[], opts: AIOptions): Pr
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
     body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+  const text = data.choices?.[0]?.message?.content ?? "";
+  if (!text) throw new Error("empty response");
+  return text;
+}
+
+/** GitHub Models free-tier inference — OpenAI-compatible schema, PAT with models:read. */
+async function callGithubModels(
+  token: string,
+  messages: AIMessage[],
+  opts: AIOptions,
+): Promise<string> {
+  const res = await fetch("https://models.github.ai/inference/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+    },
+    body: JSON.stringify({
+      model: GITHUB_MODEL,
+      temperature: opts.temperature ?? 0.7,
+      max_tokens: opts.maxTokens ?? 2048,
+      ...(opts.json ? { response_format: { type: "json_object" } } : {}),
+      messages: messages.map((m) => {
+        if (!m.images || m.images.length === 0) return { role: m.role, content: m.text };
+        return {
+          role: m.role,
+          content: [
+            { type: "text", text: m.text },
+            ...m.images.map((img) => ({
+              type: "image_url",
+              image_url: { url: `data:${img.mime};base64,${img.dataB64}` },
+            })),
+          ],
+        };
+      }),
+    }),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };

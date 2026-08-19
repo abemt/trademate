@@ -534,8 +534,8 @@ export function NewsWatchCard() {
       )}
       {events.length === 0 ? (
         <p className="text-sm text-ink-400">
-          Quiet so far. Mate scans gold, Fed, Trump and geopolitics headlines and flags anything
-          that moves XAUUSD.
+          Quiet so far. Mate watches the @marketfeed Telegram firehose plus gold, Fed and
+          geopolitics headlines — anything that moves XAUUSD lands here within minutes.
         </p>
       ) : (
         <ul className="space-y-2.5">

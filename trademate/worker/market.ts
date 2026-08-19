@@ -54,6 +54,34 @@ export async function fetchNewsRSS(query: string, max = 15): Promise<Headline[]>
   return items;
 }
 
+/** Public-channel scrape via t.me/s — no API key, works from a Worker. */
+export async function fetchTelegramNews(handle: string, max = 20): Promise<Headline[]> {
+  const res = await fetch(`https://t.me/s/${encodeURIComponent(handle)}`, {
+    headers: { "User-Agent": "Mozilla/5.0 (compatible; TradeMate/1.0)" },
+  });
+  if (!res.ok) throw new Error(`t.me HTTP ${res.status}`);
+  const html = await res.text();
+  const items: Headline[] = [];
+  // Page lists oldest→newest; each message sits in a tgme_widget_message_wrap block.
+  const blocks = html.split('class="tgme_widget_message_wrap').slice(1);
+  for (const block of blocks) {
+    const textM = block.match(/class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/);
+    if (!textM) continue;
+    const raw = textM[1]
+      .replace(/<br\s*\/?>/gi, " ")
+      .replace(/<[^>]+>/g, "")
+      .trim();
+    const title = decodeEntities(raw).replace(/\s+/g, " ").slice(0, 220);
+    const pubDate = block.match(/<time[^>]+datetime="([^"]+)"/)?.[1] ?? "";
+    if (title.length > 15) items.push({ title, pubDate });
+  }
+  return items.slice(-max).reverse(); // newest first
+}
+
+/** USD/gold relevance for the raw Telegram firehose. */
+const GOLD_USD_RE =
+  /gold|xau|silver|dxy|dollar|usd|treasur|yield|fomc|fed\b|powell|cpi|ppi|pce|nfp|payroll|jobless|gdp|rate (cut|hike|decision)|trump|tariff|sanction|geopolit|iran|israel|china|war|risk[ -]off|safe haven/i;
+
 interface Candle {
   datetime: string;
   open: string;
@@ -96,12 +124,14 @@ const BRIEFING_CONTRACT = `Return STRICT JSON only:
   "bias": "bullish" | "bearish" | "neutral",
   "confidence": 0-100,
   "one_liner": "the day in one honest sentence",
+  "drivers": ["2-4 fundamental drivers actually moving gold today, most important first"],
   "narrative": "3-5 sentences weaving macro, news sentiment and price action together, plain text",
   "sentiment": "one sentence on the news/positioning mood",
   "key_levels": {"support": [numbers from the candle data], "resistance": [numbers]},
   "landmines": [{"event": "name", "time_utc": "ISO time", "why": "one line"}],
   "invalidation": "what price/event action would flip this bias"
-}`;
+}
+Calibrate confidence honestly: conflicting drivers or a choppy regime means confidence below 55 and usually a neutral bias. Above 75 only when calendar, feed and price action all point the same way. A wrong high-confidence call costs the trader real money — hedge with neutral when unsure.`;
 
 /** Ask + parse with one retry — AI JSON output occasionally arrives malformed. */
 async function askMateJson<T>(
@@ -126,15 +156,20 @@ export async function generateBriefing(
   const tz = String(profile.timezone ?? "Africa/Addis_Ababa");
   const today = localDate(tz);
 
-  const [calendar, headlines, gold] = await Promise.all([
+  const [calendar, headlines, telegram, gold] = await Promise.all([
     fetchFFCalendar().catch(() => [] as CalEvent[]),
     fetchNewsRSS('gold price OR XAUUSD OR "federal reserve" OR DXY OR Iran OR tariffs', 12).catch(
+      () => [] as Headline[],
+    ),
+    fetchTelegramNews(env.TELEGRAM_NEWS_CHANNEL ?? "marketfeed", 30).catch(
       () => [] as Headline[],
     ),
     env.TWELVEDATA_API_KEY
       ? fetchGold(env.TWELVEDATA_API_KEY)
       : Promise.resolve({ price: null, candles: [] }),
   ]);
+
+  const feedLines = telegram.filter((h) => GOLD_USD_RE.test(h.title)).slice(0, 10);
 
   // Today's USD events (in trader-local terms), high/medium impact
   const events = calendar
@@ -174,7 +209,14 @@ export async function generateBriefing(
       ? `Overnight headlines:\n${headlines.map((h) => `- ${h.title}`).join("\n")}`
       : "No headlines fetched.",
     "",
+    feedLines.length
+      ? `Live trader feed (Telegram, newest first — weigh this over stale headlines):\n${feedLines
+          .map((h) => `- ${h.title}`)
+          .join("\n")}`
+      : "",
+    "",
     "Base key_levels ONLY on the candle data above (recent swing highs/lows, round numbers near price). Do not invent prices.",
+    "Weigh evidence in this order: today's calendar events > live feed > overnight headlines > candle structure.",
     "Remember the regime is choppy and I trade NY session mainly, London sometimes.",
     BRIEFING_CONTRACT,
   ]
@@ -220,12 +262,29 @@ const HOT_RE =
   /war|missile|strike|attack|bomb|nuclear|iran|israel|hormuz|strait|escalat|invasion|tariff|sanction|trump|powell|fed |federal reserve|rate cut|rate hike|emergency|inflation|cpi|nfp|payroll|jobs report|debt ceiling|shutdown|gold (surge|plunge|soar|crash|record)/i;
 
 export async function scanNews(env: Env): Promise<{ scanned: number; fresh: unknown[] }> {
-  const headlines = await fetchNewsRSS(
-    'gold OR XAUUSD OR Trump OR Iran OR "federal reserve" OR tariffs OR war',
-    20,
-  ).catch(() => [] as Headline[]);
-  const hot = headlines.filter((h) => HOT_RE.test(h.title));
-  if (hot.length === 0) return { scanned: headlines.length, fresh: [] };
+  const [rss, tg] = await Promise.all([
+    fetchNewsRSS(
+      'gold OR XAUUSD OR Trump OR Iran OR "federal reserve" OR tariffs OR war',
+      20,
+    ).catch(() => [] as Headline[]),
+    fetchTelegramNews(env.TELEGRAM_NEWS_CHANNEL ?? "marketfeed", 25).catch(
+      () => [] as Headline[],
+    ),
+  ]);
+  const seen = new Set<string>();
+  const hot: Headline[] = [];
+  for (const h of [
+    ...tg.filter((h2) => HOT_RE.test(h2.title) || GOLD_USD_RE.test(h2.title)),
+    ...rss.filter((h2) => HOT_RE.test(h2.title)),
+  ]) {
+    const key = h.title.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      hot.push(h);
+    }
+  }
+  const scannedCount = rss.length + tg.length;
+  if (hot.length === 0) return { scanned: scannedCount, fresh: [] };
 
   const fresh: Headline[] = [];
   for (const h of hot) {
@@ -234,7 +293,7 @@ export async function scanNews(env: Env): Promise<{ scanned: number; fresh: unkn
       .first();
     if (!exists) fresh.push(h);
   }
-  if (fresh.length === 0) return { scanned: headlines.length, fresh: [] };
+  if (fresh.length === 0) return { scanned: scannedCount, fresh: [] };
 
   let classified: { title: string; severity: string; gold_impact: string; note: string }[] = [];
   try {
@@ -281,7 +340,7 @@ export async function scanNews(env: Env): Promise<{ scanned: number; fresh: unkn
     }).catch(() => 0);
   }
 
-  return { scanned: headlines.length, fresh: stored };
+  return { scanned: scannedCount, fresh: stored };
 }
 
 // ---------- weekly coach report ----------
