@@ -12,6 +12,7 @@ import {
   TIMEFRAMES,
   TRADE_SESSIONS,
   TRIGGERS,
+  accountTrades,
   currentBalance,
   currentSessionId,
   type Trade,
@@ -66,7 +67,12 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
   const profile = useApp((s) => s.profile);
   const saveTrade = useApp((s) => s.saveTrade);
   const trades = useApp((s) => s.trades);
-  const accountSize = currentBalance(profile?.account_size ?? 10_000, trades);
+  const accounts = useApp((s) => s.accounts);
+  const activeAccount = accounts.find((a) => a.active === 1 && a.archived === 0) ?? null;
+  const accountSize = currentBalance(
+    activeAccount?.starting_balance ?? profile?.account_size ?? 10_000,
+    accountTrades(trades, activeAccount?.id ?? null),
+  );
 
   const base = existing ?? prefill ?? null;
   const initialSetup = base?.setup_type ?? null;
@@ -103,6 +109,7 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
   const [urgeBefore, setUrgeBefore] = useState<number | null>(base?.urge_before ?? null);
   const [bodyDuring, setBodyDuring] = useState<number | null>(base?.body_during ?? null);
   const [exitFeeling, setExitFeeling] = useState<string | null>(base?.exit_feeling ?? null);
+  const [feelingNote, setFeelingNote] = useState<string>(base?.feeling_note ?? "");
   const [autopilot, setAutopilot] = useState<number | null>(
     existing?.autopilot ?? prefill?.autopilot ?? null,
   );
@@ -124,6 +131,10 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
     }
     if (bodyBefore === null || urgeBefore === null) {
       setError("Nervous-system check first — body state and urge level are required. That's the whole point.");
+      return;
+    }
+    if (!existing && feelingNote.trim().length < 5) {
+      setError("Write what you're actually feeling — one honest sentence is enough. That's the journal that cuts the mistakes.");
       return;
     }
     const pnl = isClosed ? Number.parseFloat(pnlText) : null;
@@ -172,6 +183,8 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
       body_during: bodyDuring,
       exit_feeling: isClosed ? exitFeeling : null,
       autopilot: isClosed ? autopilot : null,
+      account_id: existing?.account_id ?? activeAccount?.id ?? null,
+      feeling_note: feelingNote.trim() === "" ? null : feelingNote.trim(),
     };
     void saveTrade(trade);
     onClose();
@@ -219,6 +232,16 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
         <div className="mt-3">
           <FieldLabel>Urge to be in a trade</FieldLabel>
           <ScaleRow value={urgeBefore} onChange={setUrgeBefore} />
+        </div>
+        <div className="mt-3">
+          <FieldLabel>In your own words — what's happening in your head right now?</FieldLabel>
+          <textarea
+            value={feelingNote}
+            onChange={(e) => setFeelingNote(e.target.value)}
+            rows={2}
+            placeholder='e.g. "heart still racing from the last loss, I want it back" — the honest version'
+            className="w-full resize-none rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60"
+          />
         </div>
       </div>
 

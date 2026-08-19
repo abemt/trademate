@@ -8,6 +8,7 @@ import {
   SETUPS,
   TRADE_SESSIONS,
   TRIGGERS,
+  accountTrades,
   fmtR,
   fmtUsd,
   localDateKey,
@@ -179,7 +180,13 @@ function TradeRow({
 }
 
 export function Journal() {
-  const trades = useApp((s) => s.trades);
+  const allTrades = useApp((s) => s.trades);
+  const accounts = useApp((s) => s.accounts);
+  const active = accounts.find((a) => a.active === 1 && a.archived === 0) ?? null;
+  const trades = useMemo(
+    () => accountTrades(allTrades, active?.id ?? null),
+    [allTrades, active?.id],
+  );
   const maxPerDay = useApp((s) => s.profile?.max_trades_per_day) ?? 2;
   const logFormOpen = useApp((s) => s.logFormOpen);
   const setLogFormOpen = useApp((s) => s.setLogFormOpen);

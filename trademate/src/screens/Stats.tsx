@@ -15,6 +15,7 @@ import { useApp } from "../lib/store";
 import {
   EMOTIONS,
   SETUPS,
+  accountTrades,
   computeStats,
   fmtR,
   fmtUsd,
@@ -412,9 +413,9 @@ function MonthCalendar({ trades, maxPerDay }: { trades: Trade[]; maxPerDay: numb
         </button>
       </div>
 
-      <div className="grid grid-cols-7 gap-1.5 text-center">
+      <div className="grid grid-cols-7 gap-1.5 text-center sm:gap-2">
         {WEEKDAYS.map((d, i) => (
-          <span key={i} className="py-0.5 text-[10px] font-bold uppercase tracking-wider text-ink-400">
+          <span key={i} className="py-1 text-[10px] font-bold uppercase tracking-wider text-ink-400 sm:text-xs">
             {d}
           </span>
         ))}
@@ -435,7 +436,7 @@ function MonthCalendar({ trades, maxPerDay }: { trades: Trade[]; maxPerDay: numb
               disabled={!agg}
               onClick={() => setSelected(k)}
               style={bg ? { backgroundColor: bg } : undefined}
-              className={`relative flex aspect-square flex-col items-center justify-center rounded-xl text-xs font-semibold transition ${
+              className={`relative flex min-h-12 flex-col items-center justify-center rounded-xl text-xs font-semibold transition sm:min-h-16 sm:text-sm lg:min-h-20 ${
                 agg ? "text-white hover:scale-105" : "text-ink-600"
               } ${!bg && agg ? "bg-ink-800" : ""} ${!agg ? "bg-ink-900/40" : ""} ${
                 over ? "ring-1 ring-down" : ""
@@ -443,9 +444,14 @@ function MonthCalendar({ trades, maxPerDay }: { trades: Trade[]; maxPerDay: numb
             >
               {dayNum}
               {agg && agg.closedCount > 0 && (
-                <span className="text-[8px] font-bold leading-none opacity-90">
+                <span className="text-[8px] font-bold leading-none opacity-90 sm:text-[11px]">
                   {agg.pnl > 0 ? "+" : ""}
                   {Math.round(agg.pnl)}
+                </span>
+              )}
+              {agg && agg.closedCount > 0 && (
+                <span className="hidden text-[9px] font-medium leading-tight text-white/70 sm:block">
+                  {agg.trades.length} trade{agg.trades.length === 1 ? "" : "s"}
                 </span>
               )}
               {agg && agg.trades.some((t) => t.status === "open") && (
@@ -848,7 +854,13 @@ function WeeklyReviewCard() {
 }
 
 export function Stats() {
-  const trades = useApp((s) => s.trades);
+  const allTrades = useApp((s) => s.trades);
+  const accounts = useApp((s) => s.accounts);
+  const active = accounts.find((a) => a.active === 1 && a.archived === 0) ?? null;
+  const trades = useMemo(
+    () => accountTrades(allTrades, active?.id ?? null),
+    [allTrades, active?.id],
+  );
   const maxPerDay = useApp((s) => s.profile?.max_trades_per_day) ?? 2;
   const s = useMemo(() => computeStats(trades, maxPerDay), [trades, maxPerDay]);
 
@@ -877,9 +889,12 @@ export function Stats() {
         <h1 className="text-2xl font-bold text-white">Stats</h1>
         <p className="mt-1 text-sm text-ink-300">
           {s.closedCount} closed trade{s.closedCount === 1 ? "" : "s"} across {s.tradeDays} day
-          {s.tradeDays === 1 ? "" : "s"}.
+          {s.tradeDays === 1 ? "" : "s"}
+          {active ? <> · <span className="font-semibold text-gold-500">{active.label}</span></> : null}
         </p>
       </div>
+
+      <MonthCalendar trades={trades} maxPerDay={maxPerDay} />
 
       <div className="space-y-4 lg:columns-2 lg:gap-4 lg:space-y-0 lg:[&>*]:mb-4 lg:[&>*]:break-inside-avoid">
       <div className="grid grid-cols-3 gap-2">
@@ -905,8 +920,6 @@ export function Stats() {
       <DisciplineTriangle trades={trades} maxPerDay={maxPerDay} />
 
       <NervousSystemCard trades={trades} />
-
-      <MonthCalendar trades={trades} maxPerDay={maxPerDay} />
 
       <MonthlyProgress trades={trades} />
 

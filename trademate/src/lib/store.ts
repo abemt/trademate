@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { api } from "./api";
 import { fetchMergedTrades, flushQueue, queueUpsert } from "./sync";
-import type { Trade } from "./trades";
+import type { Account, Trade } from "./trades";
 
 export interface Profile {
   id: number;
@@ -40,6 +40,7 @@ interface AppState {
   tab: Tab;
   profile: Profile | null;
   trades: Trade[];
+  accounts: Account[];
   logFormOpen: boolean;
   prefill: Partial<Trade> | null;
   setTab: (tab: Tab) => void;
@@ -48,6 +49,10 @@ interface AppState {
   checkAuth: () => Promise<void>;
   login: (passcode: string) => Promise<boolean>;
   loadProfile: () => Promise<void>;
+  loadAccounts: () => Promise<void>;
+  addAccount: (a: { label: string; type: string; starting_balance: number }) => Promise<void>;
+  activateAccount: (id: string) => Promise<void>;
+  archiveAccount: (id: string) => Promise<void>;
   loadTrades: () => Promise<void>;
   saveTrade: (t: Trade) => Promise<void>;
   deleteTrade: (id: string) => Promise<void>;
@@ -58,6 +63,7 @@ export const useApp = create<AppState>((set, get) => ({
   tab: "today",
   profile: null,
   trades: [],
+  accounts: [],
   logFormOpen: false,
   prefill: null,
 
@@ -71,6 +77,7 @@ export const useApp = create<AppState>((set, get) => ({
       if (r.authed) {
         set({ auth: "authed" });
         void get().loadProfile();
+        void get().loadAccounts();
         void get().loadTrades();
       } else {
         set({ auth: "locked" });
@@ -85,6 +92,7 @@ export const useApp = create<AppState>((set, get) => ({
       await api("/auth/login", { method: "POST", body: JSON.stringify({ passcode }) });
       set({ auth: "authed" });
       void get().loadProfile();
+      void get().loadAccounts();
       void get().loadTrades();
       return true;
     } catch {
@@ -99,6 +107,30 @@ export const useApp = create<AppState>((set, get) => ({
     } catch {
       // keep null — screens fall back to sensible defaults
     }
+  },
+
+  loadAccounts: async () => {
+    try {
+      const r = await api<{ accounts: Account[] }>("/accounts");
+      set({ accounts: r.accounts });
+    } catch {
+      // keep current list
+    }
+  },
+
+  addAccount: async (a) => {
+    await api("/accounts", { method: "POST", body: JSON.stringify(a) });
+    await get().loadAccounts();
+  },
+
+  activateAccount: async (id) => {
+    await api("/accounts/activate", { method: "POST", body: JSON.stringify({ id }) });
+    await get().loadAccounts();
+  },
+
+  archiveAccount: async (id) => {
+    await api("/accounts/archive", { method: "POST", body: JSON.stringify({ id }) });
+    await get().loadAccounts();
   },
 
   loadTrades: async () => {

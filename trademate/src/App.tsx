@@ -62,27 +62,29 @@ function Shell() {
   const tab = useApp((s) => s.tab);
   const [settingsOpen, setSettingsOpen] = useState(false);
   return (
-    <div className="mx-auto min-h-dvh max-w-lg lg:max-w-6xl">
-      <Header onOpenSettings={() => setSettingsOpen(true)} />
-      <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      <main className="px-4 pb-28 pt-4">
-        <div key={tab} className="animate-enter">
-          {tab === "today" ? (
-            <Today />
-          ) : tab === "journal" ? (
-            <Journal />
-          ) : tab === "stats" ? (
-            <Stats />
-          ) : tab === "analyze" ? (
-            <Analyze />
-          ) : tab === "chart" ? (
-            <Chart />
-          ) : (
-            <Mate />
-          )}
-        </div>
-      </main>
-      <TabBar />
+    <div className="lg:pl-56">
+      <div className="mx-auto min-h-dvh max-w-lg lg:max-w-6xl">
+        <Header onOpenSettings={() => setSettingsOpen(true)} />
+        <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+        <main className="px-4 pb-28 pt-4 lg:pb-10">
+          <div key={tab} className="animate-enter">
+            {tab === "today" ? (
+              <Today />
+            ) : tab === "journal" ? (
+              <Journal />
+            ) : tab === "stats" ? (
+              <Stats />
+            ) : tab === "analyze" ? (
+              <Analyze />
+            ) : tab === "chart" ? (
+              <Chart />
+            ) : (
+              <Mate />
+            )}
+          </div>
+        </main>
+        <TabBar />
+      </div>
     </div>
   );
 }

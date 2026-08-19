@@ -35,6 +35,34 @@ export interface Trade {
   exit_feeling: string | null;
   /** 1 = Autopilot took over mid-trade, 0 = stayed the pilot. */
   autopilot: number | null;
+  account_id: string | null;
+  /** Free-text: what he was actually feeling at entry, in his own words. */
+  feeling_note: string | null;
+}
+
+export interface Account {
+  id: string;
+  label: string;
+  type: string;
+  starting_balance: number;
+  active: number;
+  archived: number;
+  created_at: string;
+}
+
+export const ACCOUNT_TYPES: readonly Option[] = [
+  { id: "personal", label: "Personal" },
+  { id: "prop_eval", label: "Prop eval" },
+  { id: "prop_funded", label: "Prop funded" },
+  { id: "demo", label: "Demo" },
+];
+
+/** Trades belonging to one account; pre-migration rows (NULL) belong to the legacy account. */
+export function accountTrades(trades: Trade[], accountId: string | null): Trade[] {
+  if (!accountId) return trades;
+  return trades.filter(
+    (t) => t.account_id === accountId || (t.account_id == null && accountId === "acc-legacy"),
+  );
 }
 
 export interface Option {

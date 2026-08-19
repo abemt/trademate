@@ -104,6 +104,7 @@ const TRADE_FIELDS = [
   "risk_pct", "pnl_usd", "r_multiple", "outcome", "status", "emotions", "screenshots",
   "followed_plan", "notes", "opened_at", "closed_at", "updated_at", "deleted",
   "body_before", "urge_before", "body_during", "exit_feeling", "autopilot",
+  "account_id", "feeling_note",
 ] as const;
 
 const UPSERT_TRADE_SQL = `
@@ -170,8 +171,76 @@ function cleanTrade(x: Record<string, unknown>): Record<string, unknown> | null 
     body_during: scale5(x.body_during),
     exit_feeling: str(x.exit_feeling, 20),
     autopilot: x.autopilot === 1 || x.autopilot === 0 ? x.autopilot : null,
+    account_id: str(x.account_id, 64),
+    feeling_note: str(x.feeling_note, 2000),
   };
 }
+
+// ---------- accounts ----------
+
+const ACCOUNT_TYPES = ["personal", "prop_eval", "prop_funded", "demo"];
+
+app.get("/accounts", async (c) => {
+  try {
+    const { results } = await c.env.DB.prepare(
+      "SELECT * FROM accounts ORDER BY archived ASC, active DESC, created_at ASC",
+    ).all();
+    return c.json({ accounts: results });
+  } catch {
+    return c.json({ accounts: [] });
+  }
+});
+
+app.post("/accounts", async (c) => {
+  const b = await c.req.json<Record<string, unknown>>().catch(() => null);
+  const label =
+    b && typeof b.label === "string" && b.label.trim() ? b.label.trim().slice(0, 60) : null;
+  if (!label) return c.json({ error: "Label required" }, 400);
+  const type = ACCOUNT_TYPES.includes(String(b?.type)) ? String(b?.type) : "personal";
+  const start =
+    typeof b?.starting_balance === "number" && Number.isFinite(b.starting_balance)
+      ? b.starting_balance
+      : 0;
+  const id = `acc-${crypto.randomUUID().slice(0, 8)}`;
+  await c.env.DB.prepare("UPDATE accounts SET active = 0").run();
+  await c.env.DB.prepare(
+    "INSERT INTO accounts (id, label, type, starting_balance, active) VALUES (?,?,?,?,1)",
+  )
+    .bind(id, label, type, start)
+    .run();
+  return c.json({ id });
+});
+
+app.post("/accounts/activate", async (c) => {
+  const b = await c.req.json<{ id?: string }>().catch(() => null);
+  if (!b?.id) return c.json({ error: "id required" }, 400);
+  await c.env.DB.prepare("UPDATE accounts SET active = 0").run();
+  await c.env.DB.prepare("UPDATE accounts SET active = 1, archived = 0 WHERE id = ?")
+    .bind(b.id)
+    .run();
+  return c.json({ ok: true });
+});
+
+app.post("/accounts/archive", async (c) => {
+  const b = await c.req.json<{ id?: string }>().catch(() => null);
+  if (!b?.id) return c.json({ error: "id required" }, 400);
+  const other = await c.env.DB.prepare(
+    "SELECT id FROM accounts WHERE archived = 0 AND id != ? LIMIT 1",
+  )
+    .bind(b.id)
+    .first<{ id: string }>();
+  if (!other) return c.json({ error: "Add another account before archiving your only one" }, 400);
+  const was = await c.env.DB.prepare("SELECT active FROM accounts WHERE id = ?")
+    .bind(b.id)
+    .first<{ active: number }>();
+  await c.env.DB.prepare("UPDATE accounts SET archived = 1, active = 0 WHERE id = ?")
+    .bind(b.id)
+    .run();
+  if (was?.active) {
+    await c.env.DB.prepare("UPDATE accounts SET active = 1 WHERE id = ?").bind(other.id).run();
+  }
+  return c.json({ ok: true });
+});
 
 app.get("/trades", async (c) => {
   const { results } = await c.env.DB.prepare(

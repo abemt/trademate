@@ -16,7 +16,7 @@ import {
   NewsWatchCard,
 } from "../components/TodayCards";
 import { useApp } from "../lib/store";
-import { computeStats, currentBalance, localDateKey } from "../lib/trades";
+import { accountTrades, computeStats, currentBalance, localDateKey } from "../lib/trades";
 import {
   SESSIONS,
   formatCountdown,
@@ -169,7 +169,12 @@ const RISK_CHOICES = [0.5, 1.0];
 function RiskCalc() {
   const profile = useApp((s) => s.profile);
   const trades = useApp((s) => s.trades);
-  const accountSize = currentBalance(profile?.account_size ?? 10_000, trades);
+  const accounts = useApp((s) => s.accounts);
+  const active = accounts.find((a) => a.active === 1 && a.archived === 0) ?? null;
+  const accountSize = currentBalance(
+    active?.starting_balance ?? profile?.account_size ?? 10_000,
+    accountTrades(trades, active?.id ?? null),
+  );
   const [riskPct, setRiskPct] = useState(0.5);
   const [slPips, setSlPips] = useState(75);
 
@@ -177,7 +182,7 @@ function RiskCalc() {
   const lots = Math.floor((riskUsd / (slPips * 10)) * 100) / 100; // XAUUSD: $10/pip per lot
 
   return (
-    <Card title="Risk Guard" icon={<IconShield />} badge={profile?.account_label ?? "10k eval"}>
+    <Card title="Risk Guard" icon={<IconShield />} badge={active?.label ?? profile?.account_label ?? "account"}>
       <div className="mb-3 flex gap-2">
         {RISK_CHOICES.map((r) => (
           <button

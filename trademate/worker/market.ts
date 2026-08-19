@@ -78,6 +78,18 @@ export async function fetchTelegramNews(handle: string, max = 20): Promise<Headl
   return items.slice(-max).reverse(); // newest first
 }
 
+/** All configured Telegram channels (comma-separated env var). */
+async function fetchAllTelegram(env: Env, perChannel = 20): Promise<Headline[]> {
+  const channels = (env.TELEGRAM_NEWS_CHANNEL ?? "marketfeed")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const lists = await Promise.all(
+    channels.map((ch) => fetchTelegramNews(ch, perChannel).catch(() => [] as Headline[])),
+  );
+  return lists.flat();
+}
+
 /** USD/gold relevance for the raw Telegram firehose. */
 const GOLD_USD_RE =
   /gold|xau|silver|dxy|dollar|usd|treasur|yield|fomc|fed\b|powell|cpi|ppi|pce|nfp|payroll|jobless|gdp|rate (cut|hike|decision)|trump|tariff|sanction|geopolit|iran|israel|china|war|risk[ -]off|safe haven/i;
@@ -161,9 +173,7 @@ export async function generateBriefing(
     fetchNewsRSS('gold price OR XAUUSD OR "federal reserve" OR DXY OR Iran OR tariffs', 12).catch(
       () => [] as Headline[],
     ),
-    fetchTelegramNews(env.TELEGRAM_NEWS_CHANNEL ?? "marketfeed", 30).catch(
-      () => [] as Headline[],
-    ),
+    fetchAllTelegram(env, 25),
     env.TWELVEDATA_API_KEY
       ? fetchGold(env.TWELVEDATA_API_KEY)
       : Promise.resolve({ price: null, candles: [] }),
@@ -262,19 +272,22 @@ const HOT_RE =
   /war|missile|strike|attack|bomb|nuclear|iran|israel|hormuz|strait|escalat|invasion|tariff|sanction|trump|powell|fed |federal reserve|rate cut|rate hike|emergency|inflation|cpi|nfp|payroll|jobs report|debt ceiling|shutdown|gold (surge|plunge|soar|crash|record)/i;
 
 export async function scanNews(env: Env): Promise<{ scanned: number; fresh: unknown[] }> {
-  const [rss, tg] = await Promise.all([
+  const [rss, bloomberg, tg] = await Promise.all([
     fetchNewsRSS(
       'gold OR XAUUSD OR Trump OR Iran OR "federal reserve" OR tariffs OR war',
       20,
     ).catch(() => [] as Headline[]),
-    fetchTelegramNews(env.TELEGRAM_NEWS_CHANNEL ?? "marketfeed", 25).catch(
-      () => [] as Headline[],
-    ),
+    fetchNewsRSS(
+      '(gold OR XAUUSD OR dollar OR "federal reserve" OR treasury) source:bloomberg',
+      10,
+    ).catch(() => [] as Headline[]),
+    fetchAllTelegram(env, 25),
   ]);
   const seen = new Set<string>();
   const hot: Headline[] = [];
   for (const h of [
     ...tg.filter((h2) => HOT_RE.test(h2.title) || GOLD_USD_RE.test(h2.title)),
+    ...bloomberg.filter((h2) => HOT_RE.test(h2.title) || GOLD_USD_RE.test(h2.title)),
     ...rss.filter((h2) => HOT_RE.test(h2.title)),
   ]) {
     const key = h.title.toLowerCase();
@@ -283,7 +296,7 @@ export async function scanNews(env: Env): Promise<{ scanned: number; fresh: unkn
       hot.push(h);
     }
   }
-  const scannedCount = rss.length + tg.length;
+  const scannedCount = rss.length + bloomberg.length + tg.length;
   if (hot.length === 0) return { scanned: scannedCount, fresh: [] };
 
   const fresh: Headline[] = [];

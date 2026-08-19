@@ -17,8 +17,8 @@
     }
   ],
   "vars": {
-    // Public Telegram channel scraped via t.me/s for the live news feed.
-    "TELEGRAM_NEWS_CHANNEL": "marketfeed"
+    // Public Telegram channels scraped via t.me/s for the live news feed (comma-separated).
+    "TELEGRAM_NEWS_CHANNEL": "marketfeed,Forex_LiveStream"
   },
   // Custom domain — activates on deploy once the abemt.dev zone is active in Cloudflare.
   "routes": [{ "pattern": "trademate.abemt.dev", "custom_domain": true }],

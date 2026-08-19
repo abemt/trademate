@@ -4,15 +4,164 @@ import { Sheet } from "./Sheet";
 import { api } from "../lib/api";
 import { pushState, sendTestPush, subscribePush, type PushState } from "../lib/push";
 import { useApp } from "../lib/store";
-import { currentBalance } from "../lib/trades";
+import { ACCOUNT_TYPES, accountTrades, currentBalance, optionLabel } from "../lib/trades";
+
+function AccountsManager() {
+  const accounts = useApp((s) => s.accounts);
+  const trades = useApp((s) => s.trades);
+  const addAccount = useApp((s) => s.addAccount);
+  const activateAccount = useApp((s) => s.activateAccount);
+  const archiveAccount = useApp((s) => s.archiveAccount);
+
+  const [adding, setAdding] = useState(false);
+  const [label, setLabel] = useState("");
+  const [type, setType] = useState("personal");
+  const [start, setStart] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const live = accounts.filter((a) => a.archived === 0);
+
+  async function create() {
+    if (!label.trim()) {
+      setErr("Give it a name — e.g. Personal $10 or FundingPips 10K");
+      return;
+    }
+    setBusy(true);
+    setErr("");
+    try {
+      await addAccount({
+        label: label.trim(),
+        type,
+        starting_balance: Number.parseFloat(start) || 0,
+      });
+      setAdding(false);
+      setLabel("");
+      setStart("");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to add account");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <FieldLabel>Accounts — tap to switch, journal follows the active one</FieldLabel>
+      <ul className="space-y-2">
+        {live.map((a) => {
+          const bal = currentBalance(a.starting_balance, accountTrades(trades, a.id));
+          const isActive = a.active === 1;
+          return (
+            <li
+              key={a.id}
+              className={`flex items-center gap-2.5 rounded-xl border p-3 transition ${
+                isActive
+                  ? "border-gold-500/60 bg-gold-500/10"
+                  : "border-white/10 bg-ink-800"
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => void activateAccount(a.id)}
+                className="min-w-0 flex-1 text-left"
+              >
+                <p className="flex items-center gap-2 truncate text-sm font-semibold text-white">
+                  {a.label}
+                  {isActive && (
+                    <span className="rounded-full bg-gold-500/20 px-1.5 py-px text-[9px] font-bold uppercase tracking-wider text-gold-300">
+                      active
+                    </span>
+                  )}
+                </p>
+                <p className="text-xs text-ink-400">
+                  {optionLabel(ACCOUNT_TYPES, a.type) ?? a.type} · started $
+                  {a.starting_balance.toLocaleString(undefined, { maximumFractionDigits: 2 })} · live{" "}
+                  <span className={`font-semibold ${bal >= a.starting_balance ? "text-up" : "text-down"}`}>
+                    ${bal.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                  </span>
+                </p>
+              </button>
+              {live.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm(`Archive "${a.label}"? Its trades stay in your history.`)) {
+                      void archiveAccount(a.id);
+                    }
+                  }}
+                  className="rounded-lg border border-white/10 bg-ink-900 px-2 py-1 text-[10px] font-semibold text-ink-400 transition hover:border-down/50 hover:text-down"
+                >
+                  archive
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+
+      {adding ? (
+        <div className="mt-3 space-y-3 rounded-xl border border-gold-500/25 bg-gold-500/5 p-3">
+          <input
+            type="text"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder='Name — e.g. "Personal $10" or "FundingPips 10K"'
+            autoFocus
+            className="w-full rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60"
+          />
+          <ChipRow>
+            {ACCOUNT_TYPES.map((t) => (
+              <Chip key={t.id} active={type === t.id} onClick={() => setType(t.id)}>
+                {t.label}
+              </Chip>
+            ))}
+          </ChipRow>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={start}
+            onChange={(e) => setStart(e.target.value)}
+            placeholder="Starting balance ($)"
+            className="w-full rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60"
+          />
+          {err && <p className="text-xs text-down">{err}</p>}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setAdding(false)}
+              className="rounded-xl border border-white/10 bg-ink-800 py-2 text-sm font-semibold text-ink-300"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void create()}
+              disabled={busy}
+              className="rounded-xl bg-gold-500 py-2 text-sm font-semibold text-ink-950 disabled:opacity-50"
+            >
+              {busy ? "Adding…" : "Add & switch"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAdding(true)}
+          className="mt-3 w-full rounded-xl border border-dashed border-gold-500/40 bg-gold-500/5 py-2.5 text-sm font-semibold text-gold-400 transition hover:bg-gold-500/10"
+        >
+          ＋ Add account (new personal, funded, or a reset)
+        </button>
+      )}
+    </div>
+  );
+}
 
 export function SettingsSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const profile = useApp((s) => s.profile);
   const loadProfile = useApp((s) => s.loadProfile);
-  const trades = useApp((s) => s.trades);
 
   const [name, setName] = useState("");
-  const [balance, setBalance] = useState("");
   const [maxTrades, setMaxTrades] = useState(2);
   const [phase, setPhase] = useState(1);
   const [regime, setRegime] = useState("choppy");
@@ -26,7 +175,6 @@ export function SettingsSheet({ open, onClose }: { open: boolean; onClose: () =>
   useEffect(() => {
     if (!open || !profile) return;
     setName(profile.trader_name);
-    setBalance(String(profile.account_size));
     setMaxTrades(profile.max_trades_per_day);
     setPhase(profile.eval_phase);
     setRegime(profile.market_regime);
@@ -44,7 +192,6 @@ export function SettingsSheet({ open, onClose }: { open: boolean; onClose: () =>
         method: "PUT",
         body: JSON.stringify({
           trader_name: name,
-          account_size: Number.parseFloat(balance),
           max_trades_per_day: maxTrades,
           eval_phase: phase,
           market_regime: regime,
@@ -77,6 +224,8 @@ export function SettingsSheet({ open, onClose }: { open: boolean; onClose: () =>
   return (
     <Sheet open={open} onClose={onClose} title="Settings">
       <div className="space-y-5">
+        <AccountsManager />
+
         <div>
           <FieldLabel>Your name</FieldLabel>
           <input
@@ -85,28 +234,6 @@ export function SettingsSheet({ open, onClose }: { open: boolean; onClose: () =>
             onChange={(e) => setName(e.target.value)}
             className="w-full rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white outline-none focus:border-gold-500/60"
           />
-        </div>
-
-        <div>
-          <FieldLabel>Starting balance ($) — wins &amp; losses update the live balance for you</FieldLabel>
-          <input
-            type="text"
-            inputMode="decimal"
-            value={balance}
-            onChange={(e) => setBalance(e.target.value)}
-            className="w-full rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white outline-none focus:border-gold-500/60"
-          />
-          <p className="mt-1.5 text-xs text-ink-400">
-            Live balance:{" "}
-            <span className="font-semibold text-white">
-              $
-              {currentBalance(
-                Number.parseFloat(balance) || profile?.account_size || 0,
-                trades,
-              ).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-            </span>{" "}
-            · starting balance + closed P&amp;L from your journal
-          </p>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
