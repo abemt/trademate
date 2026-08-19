@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+/* Accent scale is VIOLET (class names kept as gold-* so components don't churn).
+   True gold is reserved for XAUUSD price accents via --color-xau. */
 @theme {
   --color-ink-950: #07090c;
   --color-ink-900: #0b0e13;
@@ -11,12 +13,13 @@
   --color-ink-300: #8b95a9;
   --color-ink-200: #b9c1d0;
   --color-ink-100: #d7dce6;
-  --color-gold-100: #f8ecd0;
-  --color-gold-200: #f5e2b1;
-  --color-gold-300: #f4d998;
-  --color-gold-400: #e8bf5b;
-  --color-gold-500: #d9a83f;
-  --color-gold-600: #b8862e;
+  --color-gold-100: #ede9fe;
+  --color-gold-200: #ddd6fe;
+  --color-gold-300: #c4b5fd;
+  --color-gold-400: #a78bfa;
+  --color-gold-500: #8b5cf6;
+  --color-gold-600: #7c3aed;
+  --color-xau: #e8bf5b;
   --color-up: #34d399;
   --color-down: #f87171;
   --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -26,29 +29,34 @@
 :root {
   --page-bg: #07090c;
   --page-text: #b9c1d0;
+  --card-shadow: 0 8px 30px rgb(0 0 0 / 0.25);
+  --accent-glow: rgb(139 92 246 / 0.08);
 }
 
 /* Light theme — re-maps the same tokens, so every component follows. */
 [data-theme="light"] {
-  --page-bg: #eef0f4;
-  --page-text: #2a3242;
-  --color-ink-950: #eef0f4;
+  --page-bg: #f5f5fa;
+  --page-text: #2e3348;
+  --card-shadow: 0 6px 24px rgb(76 29 149 / 0.07), 0 1px 3px rgb(30 27 60 / 0.05);
+  --accent-glow: rgb(139 92 246 / 0.05);
+  --color-ink-950: #f5f5fa;
   --color-ink-900: #ffffff;
-  --color-ink-800: #f1f3f7;
-  --color-ink-700: #e3e7ee;
-  --color-ink-600: #c9d0dc;
-  --color-ink-500: #a3adbf;
-  --color-ink-400: #667085;
-  --color-ink-300: #4a5468;
-  --color-ink-200: #2a3242;
-  --color-ink-100: #1b2333;
-  --color-white: #101623; /* "white" text becomes near-black on light */
-  --color-gold-100: #6d5420;
-  --color-gold-200: #5d481c;
-  --color-gold-300: #7d5d1f;
-  --color-gold-400: #9c7427;
-  --color-gold-500: #b8862e;
-  --color-gold-600: #96702a;
+  --color-ink-800: #f3f3f9;
+  --color-ink-700: #e9e9f2;
+  --color-ink-600: #d3d4e2;
+  --color-ink-500: #a6a9be;
+  --color-ink-400: #6b7089;
+  --color-ink-300: #4d5268;
+  --color-ink-200: #2e3348;
+  --color-ink-100: #1e2235;
+  --color-white: #17182b; /* "white" text becomes near-black on light */
+  --color-gold-100: #2e1065;
+  --color-gold-200: #4c1d95;
+  --color-gold-300: #5b21b6;
+  --color-gold-400: #6d28d9;
+  --color-gold-500: #7c3aed;
+  --color-gold-600: #8b5cf6;
+  --color-xau: #9c7427;
   --color-up: #0f9d6c;
   --color-down: #dc4444;
 }
@@ -61,7 +69,7 @@ body,
 
 body {
   background:
-    radial-gradient(1100px 520px at 50% -12%, rgb(232 191 91 / 0.07), transparent 60%),
+    radial-gradient(1100px 520px at 50% -12%, var(--accent-glow), transparent 60%),
     var(--page-bg);
   color: var(--page-text);
   -webkit-font-smoothing: antialiased;
@@ -70,7 +78,7 @@ body {
 }
 
 ::selection {
-  background: rgb(232 191 91 / 0.25);
+  background: rgb(139 92 246 / 0.25);
 }
 
 /* Fail-open enter transition: if animation frames are throttled (backgrounded

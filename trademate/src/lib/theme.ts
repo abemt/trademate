@@ -11,15 +11,15 @@ export function applyTheme(theme: Theme): void {
   }
   document
     .querySelector('meta[name="theme-color"]')
-    ?.setAttribute("content", theme === "light" ? "#eef0f4" : "#0b0e13");
+    ?.setAttribute("content", theme === "light" ? "#f5f5fa" : "#0b0e13");
 }
 
 export function currentTheme(): Theme {
-  return (document.documentElement.dataset.theme as Theme) ?? "dark";
+  return (document.documentElement.dataset.theme as Theme) ?? "light";
 }
 
 export function initTheme(): void {
-  let theme: Theme = "dark";
+  let theme: Theme = "light";
   try {
     const saved = localStorage.getItem(KEY);
     if (saved === "light" || saved === "dark") theme = saved;

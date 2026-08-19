@@ -103,6 +103,7 @@ const TRADE_FIELDS = [
   "entry_price", "sl_price", "tp_price", "exit_price", "sl_pips", "lots", "risk_usd",
   "risk_pct", "pnl_usd", "r_multiple", "outcome", "status", "emotions", "screenshots",
   "followed_plan", "notes", "opened_at", "closed_at", "updated_at", "deleted",
+  "body_before", "urge_before", "body_during", "exit_feeling", "autopilot",
 ] as const;
 
 const UPSERT_TRADE_SQL = `
@@ -116,6 +117,8 @@ function cleanTrade(x: Record<string, unknown>): Record<string, unknown> | null 
   if (typeof x.id !== "string" || x.id.length === 0 || x.id.length > 64) return null;
   if (x.direction !== "long" && x.direction !== "short") return null;
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const scale5 = (v: unknown) =>
+    typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 5 ? v : null;
   const str = (v: unknown, max: number) =>
     typeof v === "string" && v.length > 0 ? v.slice(0, max) : null;
   let emotions = "[]";
@@ -162,6 +165,11 @@ function cleanTrade(x: Record<string, unknown>): Record<string, unknown> | null 
     closed_at: str(x.closed_at, 40),
     updated_at: str(x.updated_at, 40) ?? now,
     deleted: x.deleted ? 1 : 0,
+    body_before: scale5(x.body_before),
+    urge_before: scale5(x.urge_before),
+    body_during: scale5(x.body_during),
+    exit_feeling: str(x.exit_feeling, 20),
+    autopilot: x.autopilot === 1 || x.autopilot === 0 ? x.autopilot : null,
   };
 }
 

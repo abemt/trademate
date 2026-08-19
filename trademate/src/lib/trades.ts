@@ -28,6 +28,13 @@ export interface Trade {
   closed_at: string | null;
   updated_at: string;
   deleted: number;
+  /** Nervous-system journal: 1 (calm) … 5 (shaking). */
+  body_before: number | null;
+  urge_before: number | null;
+  body_during: number | null;
+  exit_feeling: string | null;
+  /** 1 = Autopilot took over mid-trade, 0 = stayed the pilot. */
+  autopilot: number | null;
 }
 
 export interface Option {
@@ -66,6 +73,24 @@ export const TRADE_SESSIONS: readonly Option[] = [
   { id: "asia", label: "Asia" },
   { id: "london", label: "London" },
   { id: "newyork", label: "New York" },
+];
+
+/** Body/urge scale anchors — shared by the form and stats. */
+export const BODY_SCALE: readonly { v: number; emoji: string; label: string }[] = [
+  { v: 1, emoji: "\u{1F60C}", label: "Calm" },
+  { v: 2, emoji: "\u{1F642}", label: "Settled" },
+  { v: 3, emoji: "\u{1F610}", label: "Tense" },
+  { v: 4, emoji: "\u{1F62C}", label: "Wired" },
+  { v: 5, emoji: "\u{1FAE8}", label: "Shaking" },
+];
+
+export const EXIT_FEELINGS: readonly Option[] = [
+  { id: "calm", label: "Calm" },
+  { id: "proud", label: "Proud" },
+  { id: "relieved", label: "Relieved" },
+  { id: "angry", label: "Angry" },
+  { id: "regret", label: "Regret" },
+  { id: "numb", label: "Numb" },
 ];
 
 export function optionLabel(list: readonly Option[], id: string | null): string | null {

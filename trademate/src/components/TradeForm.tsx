@@ -5,7 +5,9 @@ import { ScreenshotPicker } from "./ScreenshotPicker";
 import { Sheet } from "./Sheet";
 import { useApp } from "../lib/store";
 import {
+  BODY_SCALE,
   EMOTIONS,
+  EXIT_FEELINGS,
   SETUPS,
   TIMEFRAMES,
   TRADE_SESSIONS,
@@ -24,6 +26,41 @@ interface Props {
 }
 
 const R_CHIPS = [-1, -0.5, 0, 1, 1.5, 2, 3];
+
+/** 1–5 emoji scale for body/urge checkpoints. */
+function ScaleRow({
+  value,
+  onChange,
+}: {
+  value: number | null;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="grid grid-cols-5 gap-1.5">
+      {BODY_SCALE.map((s) => (
+        <button
+          key={s.v}
+          type="button"
+          onClick={() => onChange(s.v)}
+          className={`flex flex-col items-center gap-0.5 rounded-xl border py-2 transition ${
+            value === s.v
+              ? "border-gold-500 bg-gold-500/15 shadow-[0_0_14px_rgb(139_92_246/0.2)]"
+              : "border-white/10 bg-ink-800 hover:border-gold-500/40"
+          }`}
+        >
+          <span className="text-lg leading-none">{s.emoji}</span>
+          <span
+            className={`text-[9px] font-semibold ${
+              value === s.v ? "text-gold-300" : "text-ink-400"
+            }`}
+          >
+            {s.label}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open">) {
   const profile = useApp((s) => s.profile);
@@ -62,6 +99,13 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
     existing?.followed_plan ?? null,
   );
   const [notes, setNotes] = useState<string>(base?.notes ?? "");
+  const [bodyBefore, setBodyBefore] = useState<number | null>(base?.body_before ?? null);
+  const [urgeBefore, setUrgeBefore] = useState<number | null>(base?.urge_before ?? null);
+  const [bodyDuring, setBodyDuring] = useState<number | null>(base?.body_during ?? null);
+  const [exitFeeling, setExitFeeling] = useState<string | null>(base?.exit_feeling ?? null);
+  const [autopilot, setAutopilot] = useState<number | null>(
+    existing?.autopilot ?? prefill?.autopilot ?? null,
+  );
   const [error, setError] = useState<string>("");
 
   const riskUsd = Math.round(((accountSize * riskPct) / 100) * 100) / 100;
@@ -78,9 +122,17 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
       setError("Long or short?");
       return;
     }
+    if (bodyBefore === null || urgeBefore === null) {
+      setError("Nervous-system check first — body state and urge level are required. That's the whole point.");
+      return;
+    }
     const pnl = isClosed ? Number.parseFloat(pnlText) : null;
     if (isClosed && (pnlText.trim() === "" || Number.isNaN(pnl))) {
       setError("Enter the P&L — the R buttons fill it for you.");
+      return;
+    }
+    if (isClosed && (exitFeeling === null || autopilot === null)) {
+      setError("Close-out check: how you felt at exit + the Autopilot question are required.");
       return;
     }
     const now = new Date().toISOString();
@@ -115,6 +167,11 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
       closed_at: isClosed ? (existing?.closed_at ?? now) : null,
       updated_at: now,
       deleted: 0,
+      body_before: bodyBefore,
+      urge_before: urgeBefore,
+      body_during: bodyDuring,
+      exit_feeling: isClosed ? exitFeeling : null,
+      autopilot: isClosed ? autopilot : null,
     };
     void saveTrade(trade);
     onClose();
@@ -147,6 +204,21 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
           >
             <IconTrendDown className="h-4.5 w-4.5" /> SHORT
           </button>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-gold-500/25 bg-gold-500/5 p-3.5">
+        <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-gold-400">
+          Nervous-system check · required
+        </p>
+        <p className="mb-3 text-[11px] leading-snug text-ink-400">
+          The chart records why you entered. This records who entered.
+        </p>
+        <FieldLabel>Body right now</FieldLabel>
+        <ScaleRow value={bodyBefore} onChange={setBodyBefore} />
+        <div className="mt-3">
+          <FieldLabel>Urge to be in a trade</FieldLabel>
+          <ScaleRow value={urgeBefore} onChange={setUrgeBefore} />
         </div>
       </div>
 
@@ -285,6 +357,34 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
               <Chip active={followedPlan === 0} onClick={() => setFollowedPlan(0)}>
                 Broke my plan
               </Chip>
+            </div>
+          </div>
+          <div className="mt-3 rounded-2xl border border-gold-500/25 bg-gold-500/5 p-3.5">
+            <p className="mb-3 text-[11px] font-bold uppercase tracking-wider text-gold-400">
+              Close-out check · required
+            </p>
+            <FieldLabel>Feeling at exit</FieldLabel>
+            <ChipRow>
+              {EXIT_FEELINGS.map((f) => (
+                <Chip key={f.id} active={exitFeeling === f.id} onClick={() => setExitFeeling(f.id)}>
+                  {f.label}
+                </Chip>
+              ))}
+            </ChipRow>
+            <div className="mt-3">
+              <FieldLabel>Did Autopilot take over mid-trade?</FieldLabel>
+              <div className="grid grid-cols-2 gap-2">
+                <Chip active={autopilot === 0} onClick={() => setAutopilot(0)}>
+                  I stayed the pilot
+                </Chip>
+                <Chip active={autopilot === 1} onClick={() => setAutopilot(1)}>
+                  Autopilot took over
+                </Chip>
+              </div>
+            </div>
+            <div className="mt-3">
+              <FieldLabel>Body while in the trade (if you watched)</FieldLabel>
+              <ScaleRow value={bodyDuring} onChange={setBodyDuring} />
             </div>
           </div>
         </div>

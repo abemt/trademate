@@ -24,13 +24,227 @@ import {
   type Trade,
 } from "../lib/trades";
 
-function StatCard({ label, value, tone }: { label: string; value: string; tone?: "up" | "down" }) {
+function StatCard({
+  label,
+  value,
+  tone,
+  pct,
+}: {
+  label: string;
+  value: string;
+  tone?: "up" | "down";
+  pct?: number | null;
+}) {
   const color = tone === "up" ? "text-up" : tone === "down" ? "text-down" : "text-white";
   return (
-    <div className="rounded-2xl border border-white/5 bg-ink-900/90 p-3.5 text-center">
+    <div className="rounded-2xl border border-white/5 bg-ink-900/90 p-3.5 text-center shadow-[var(--card-shadow)]">
       <p className="text-[10px] uppercase tracking-wider text-ink-400">{label}</p>
       <p className={`mt-1 text-xl font-bold ${color}`}>{value}</p>
+      {pct !== undefined && pct !== null && (
+        <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-ink-700">
+          <div
+            className="h-full rounded-full bg-gold-500"
+            style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+          />
+        </div>
+      )}
     </div>
+  );
+}
+
+/** Discipline Score — the triangle. Grades the trader, not the trades. */
+function DisciplineTriangle({ trades, maxPerDay }: { trades: Trade[]; maxPerDay: number }) {
+  const closed = trades.filter((t) => !t.deleted && t.status === "closed");
+  const withPlan = closed.filter((t) => t.followed_plan !== null);
+  const processScore = withPlan.length
+    ? withPlan.filter((t) => t.followed_plan === 1).length / withPlan.length
+    : null;
+  const withBody = closed.filter((t) => t.body_before != null);
+  const bodyScore = withBody.length
+    ? withBody.filter((t) => (t.body_before ?? 5) <= 2).length / withBody.length
+    : null;
+  const byDay = new Map<string, number>();
+  for (const t of trades) {
+    if (t.deleted) continue;
+    const k = localDateKey(t.opened_at);
+    byDay.set(k, (byDay.get(k) ?? 0) + 1);
+  }
+  const rulesScore = byDay.size
+    ? [...byDay.values()].filter((n) => n <= maxPerDay).length / byDay.size
+    : null;
+
+  const axes = [
+    { label: "Process", hint: "plan followed", v: processScore },
+    { label: "Body", hint: "calm entries", v: bodyScore },
+    { label: "Rules", hint: "days within limit", v: rulesScore },
+  ];
+  const known = axes.filter((a) => a.v !== null);
+  if (known.length === 0) return null;
+  const score = Math.round(
+    (100 * known.reduce((acc, a) => acc + (a.v as number), 0)) / known.length,
+  );
+
+  const cx = 80;
+  const cy = 82;
+  const R = 54;
+  const angle = (i: number) => ((-90 + i * 120) * Math.PI) / 180;
+  const pt = (i: number, r: number) =>
+    [cx + r * Math.cos(angle(i)), cy + r * Math.sin(angle(i))] as const;
+  const ring = (frac: number) =>
+    axes.map((_, i) => pt(i, R * frac).map((n) => n.toFixed(1)).join(",")).join(" ");
+  const valuePoly = axes
+    .map((a, i) => pt(i, R * Math.max(0.04, a.v ?? 0)).map((n) => n.toFixed(1)).join(","))
+    .join(" ");
+
+  return (
+    <Card title="Discipline score" icon={<IconGauge />} badge="grades the trader">
+      <div className="flex items-center gap-4">
+        <svg viewBox="0 0 160 158" className="w-36 shrink-0">
+          {[1, 0.66, 0.33].map((f) => (
+            <polygon
+              key={f}
+              points={ring(f)}
+              fill="none"
+              stroke="var(--color-ink-600)"
+              strokeWidth="1"
+            />
+          ))}
+          <polygon
+            points={valuePoly}
+            fill="rgb(139 92 246 / 0.22)"
+            stroke="var(--color-gold-500)"
+            strokeWidth="2"
+            strokeLinejoin="round"
+          />
+          {axes.map((a, i) => {
+            const [x, y] = pt(i, R + 16);
+            return (
+              <text
+                key={a.label}
+                x={x}
+                y={y + 3}
+                textAnchor="middle"
+                className="fill-(--color-ink-300)"
+                fontSize="9"
+                fontWeight="700"
+              >
+                {a.label}
+              </text>
+            );
+          })}
+          <text
+            x={cx}
+            y={cy + 5}
+            textAnchor="middle"
+            className="fill-(--color-gold-400)"
+            fontSize="20"
+            fontWeight="800"
+          >
+            {score}
+          </text>
+        </svg>
+        <ul className="min-w-0 flex-1 space-y-2.5">
+          {axes.map((a) => (
+            <li key={a.label}>
+              <div className="flex items-baseline justify-between text-xs">
+                <span className="font-semibold text-white">
+                  {a.label} <span className="font-normal text-ink-400">· {a.hint}</span>
+                </span>
+                <span className="font-bold text-gold-400">
+                  {a.v === null ? "—" : `${Math.round(100 * a.v)}%`}
+                </span>
+              </div>
+              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-ink-700">
+                <div
+                  className="h-full rounded-full bg-gold-500/80"
+                  style={{ width: `${a.v === null ? 0 : Math.round(100 * a.v)}%` }}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </Card>
+  );
+}
+
+/** Body-state vs results — the reason this journal exists. */
+function NervousSystemCard({ trades }: { trades: Trade[] }) {
+  const closed = trades.filter(
+    (t) => !t.deleted && t.status === "closed" && t.pnl_usd !== null,
+  );
+  const withBody = closed.filter((t) => t.body_before != null);
+  const calm = withBody.filter((t) => (t.body_before ?? 5) <= 2);
+  const tense = withBody.filter((t) => (t.body_before ?? 0) >= 3);
+  const wr = (list: Trade[]) =>
+    list.length
+      ? Math.round((100 * list.filter((t) => (t.pnl_usd ?? 0) > 0).length) / list.length)
+      : null;
+  const withAuto = closed.filter((t) => t.autopilot != null);
+  const autoRate = withAuto.length
+    ? Math.round((100 * withAuto.filter((t) => t.autopilot === 1).length) / withAuto.length)
+    : null;
+  const avgUrge = (list: Trade[]) => {
+    const u = list.filter((t) => t.urge_before != null);
+    return u.length
+      ? Math.round((10 * u.reduce((acc, t) => acc + (t.urge_before as number), 0)) / u.length) / 10
+      : null;
+  };
+  const urgeWins = avgUrge(closed.filter((t) => (t.pnl_usd ?? 0) > 0));
+  const urgeLosses = avgUrge(closed.filter((t) => (t.pnl_usd ?? 0) < 0));
+
+  const rows: { label: string; value: string; pct: number | null; tone?: "up" | "down" }[] = [];
+  if (wr(calm) !== null)
+    rows.push({ label: `Calm entries (body 1–2) · ${calm.length}`, value: `${wr(calm)}% win`, pct: wr(calm), tone: "up" });
+  if (wr(tense) !== null)
+    rows.push({ label: `Tense entries (body 3–5) · ${tense.length}`, value: `${wr(tense)}% win`, pct: wr(tense), tone: "down" });
+  if (autoRate !== null)
+    rows.push({ label: `Autopilot took over · ${withAuto.length} closed`, value: `${autoRate}%`, pct: autoRate, tone: "down" });
+
+  return (
+    <Card title="Nervous system" icon={<IconSpark />} badge="the whole point">
+      {rows.length === 0 ? (
+        <p className="text-sm leading-relaxed text-ink-300">
+          Your next logged trades fill this in: win rate when your body was calm vs tense at
+          entry, how often Autopilot hijacked a trade, and what your urge level costs you.
+          The chart records why you entered — this records who entered.
+        </p>
+      ) : (
+        <div>
+          <ul className="space-y-3">
+            {rows.map((r) => (
+              <li key={r.label}>
+                <div className="mb-1 flex items-baseline justify-between text-sm">
+                  <span className="text-ink-200">{r.label}</span>
+                  <span
+                    className={`text-xs font-bold ${
+                      r.tone === "up" ? "text-up" : r.tone === "down" ? "text-down" : "text-white"
+                    }`}
+                  >
+                    {r.value}
+                  </span>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-ink-700">
+                  <div
+                    className={`h-full rounded-full ${r.tone === "down" ? "bg-down/70" : "bg-up/70"}`}
+                    style={{ width: `${r.pct ?? 0}%` }}
+                  />
+                </div>
+              </li>
+            ))}
+          </ul>
+          {urgeWins !== null && urgeLosses !== null && (
+            <p className="mt-3 rounded-xl border border-gold-500/20 bg-gold-500/5 p-3 text-xs leading-relaxed text-ink-200">
+              Average urge before <span className="font-bold text-up">wins</span>:{" "}
+              <span className="font-bold text-white">{urgeWins}</span> · before{" "}
+              <span className="font-bold text-down">losses</span>:{" "}
+              <span className="font-bold text-white">{urgeLosses}</span>
+              {urgeLosses > urgeWins ? " — the urge is the tell. High urge, no trade." : ""}
+            </p>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -679,7 +893,7 @@ export function Stats() {
           value={fmtR(s.netR)}
           tone={s.netR > 0 ? "up" : s.netR < 0 ? "down" : undefined}
         />
-        <StatCard label="Win rate" value={s.winRate !== null ? `${s.winRate}%` : "—"} />
+        <StatCard label="Win rate" value={s.winRate !== null ? `${s.winRate}%` : "—"} pct={s.winRate} />
         <StatCard label="Avg R" value={s.avgR !== null ? fmtR(s.avgR) : "—"} />
         <StatCard
           label="Profit factor"
@@ -687,6 +901,10 @@ export function Stats() {
         />
         <StatCard label="Open now" value={String(s.openCount)} />
       </div>
+
+      <DisciplineTriangle trades={trades} maxPerDay={maxPerDay} />
+
+      <NervousSystemCard trades={trades} />
 
       <MonthCalendar trades={trades} maxPerDay={maxPerDay} />
 

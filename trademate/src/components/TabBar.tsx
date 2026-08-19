@@ -24,7 +24,7 @@ export function TabBar() {
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-white/5 bg-ink-950/85 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl">
-      <div className="mx-auto flex max-w-lg items-stretch justify-around px-2">
+      <div className="mx-auto flex max-w-lg items-stretch justify-around px-2 py-1">
         {TABS.map((t) => {
           const { label, icon: Icon } = META[t];
           const active = tab === t;
@@ -32,19 +32,19 @@ export function TabBar() {
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`relative flex flex-1 flex-col items-center gap-1 py-2.5 text-[10px] font-medium transition-colors ${
-                active ? "text-gold-400" : "text-ink-400 hover:text-ink-200"
+              className={`relative flex flex-1 flex-col items-center gap-1 rounded-xl py-2 text-[10px] font-semibold transition-colors ${
+                active ? "text-gold-500" : "text-ink-400 hover:text-ink-200"
               }`}
             >
               {active && (
                 <motion.span
                   layoutId="tab-pill"
-                  className="absolute -top-px h-0.5 w-10 rounded-full bg-gold-400"
+                  className="absolute inset-x-1 inset-y-0.5 rounded-xl bg-gold-500/12"
                   transition={{ type: "spring", stiffness: 500, damping: 40 }}
                 />
               )}
-              <Icon className="h-5.5 w-5.5" />
-              {label}
+              <Icon className="relative z-10 h-5.5 w-5.5" />
+              <span className="relative z-10">{label}</span>
             </button>
           );
         })}

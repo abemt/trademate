@@ -15,7 +15,7 @@ export function Card({
 }) {
   return (
     <section
-      className={`rounded-2xl border border-white/5 bg-ink-900/90 p-4 shadow-[0_8px_30px_rgb(0_0_0/0.25)] ${
+      className={`rounded-2xl border border-white/5 bg-ink-900/90 p-4 shadow-[var(--card-shadow)] ${
         muted ? "opacity-70" : ""
       }`}
     >
