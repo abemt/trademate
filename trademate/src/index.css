@@ -22,8 +22,9 @@
   --color-xau: #e8bf5b;
   --color-up: #34d399;
   --color-down: #f87171;
-  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
+  /* SF on Apple devices via -apple-system; Inter (the free SF twin) everywhere else. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
 }
 
 /* Page-level vars live outside @theme so they stay dynamic (not inlined). */
@@ -83,7 +84,8 @@ body {
 h1,
 h2 {
   font-family: var(--font-display);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.022em;
+  font-weight: 700;
 }
 
 ::selection {

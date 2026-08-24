@@ -406,9 +406,11 @@ export function CircuitBreakerCard() {
   const profile = useApp((s) => s.profile);
   const setTab = useApp((s) => s.setTab);
   const dailyLimit = profile?.prop_daily_loss_usd ?? 500;
+  const maxPerDay = profile?.max_trades_per_day ?? 2;
 
-  const { consecLosses, todayPnl } = useMemo(() => {
+  const { consecLosses, todayPnl, usedToday } = useMemo(() => {
     const today = localDateKey(new Date().toISOString());
+    const todayTrades = trades.filter((t) => localDateKey(t.opened_at) === today);
     const closedToday = trades
       .filter(
         (t) =>
@@ -425,12 +427,44 @@ export function CircuitBreakerCard() {
     return {
       consecLosses: consec,
       todayPnl: closedToday.reduce((s, t) => s + t.pnl_usd!, 0),
+      usedToday: todayTrades.length,
     };
   }, [trades]);
 
+  const lossUsedPct = Math.min(100, Math.max(0, (-todayPnl / dailyLimit) * 100));
+  const overCap = usedToday > maxPerDay;
   const lossTripped = consecLosses >= 2;
   const ddWarning = todayPnl <= -dailyLimit * 0.6;
-  if (!lossTripped && !ddWarning) return null;
+  const clean = !lossTripped && !ddWarning && !overCap;
+
+  // Positive state — the guardrails are holding, say so out loud.
+  if (clean) {
+    return (
+      <section className="rounded-2xl border border-up/30 bg-up/5 p-4 shadow-[var(--card-shadow)]">
+        <div className="flex items-center gap-2">
+          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-up/15 text-xs font-bold text-up">✓</span>
+          <h2 className="text-sm font-bold text-up">No rule violations today</h2>
+          <span className="ml-auto text-[10px] font-semibold uppercase tracking-wider text-ink-400">
+            trades {usedToday}/{maxPerDay}
+          </span>
+        </div>
+        <div className="mt-3">
+          <div className="mb-1 flex items-baseline justify-between text-[11px]">
+            <span className="text-ink-400">Daily loss guard</span>
+            <span className="font-semibold text-ink-300">
+              ${Math.round(Math.max(0, -todayPnl))} / ${dailyLimit}
+            </span>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-ink-700">
+            <div
+              className={`h-full rounded-full transition-all ${lossUsedPct > 60 ? "bg-down" : "bg-up/70"}`}
+              style={{ width: `${Math.max(2, lossUsedPct)}%` }}
+            />
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="rounded-2xl border border-down/40 bg-down/10 p-4">
@@ -439,10 +473,17 @@ export function CircuitBreakerCard() {
         <h2 className="text-sm font-bold uppercase tracking-wider text-down">Circuit breaker</h2>
       </div>
       <p className="mt-2 text-sm leading-relaxed text-ink-100">
-        {lossTripped
-          ? `${consecLosses} losses in a row today. Your edge isn't showing up right now — and the next trade is the one revenge takes. You're done for today.`
-          : `You're $${Math.round(-todayPnl)} down — that's ${Math.round((-todayPnl / dailyLimit) * 100)}% of your $${dailyLimit} daily limit. One bad trade from a blown day. Step back.`}
+        {overCap
+          ? `${usedToday} trades against your rule of ${maxPerDay}. The cap exists because trade #${maxPerDay + 1} is historically your worst. Log honestly, close the platform.`
+          : lossTripped
+            ? `${consecLosses} losses in a row today. Your edge isn't showing up right now — and the next trade is the one revenge takes. You're done for today.`
+            : `You're $${Math.round(-todayPnl)} down — that's ${Math.round((-todayPnl / dailyLimit) * 100)}% of your $${dailyLimit} daily limit. One bad trade from a blown day. Step back.`}
       </p>
+      <div className="mt-3">
+        <div className="h-1.5 overflow-hidden rounded-full bg-ink-700">
+          <div className="h-full rounded-full bg-down transition-all" style={{ width: `${Math.max(2, lossUsedPct)}%` }} />
+        </div>
+      </div>
       <button
         type="button"
         onClick={() => setTab("mate")}
