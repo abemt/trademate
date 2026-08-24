@@ -109,6 +109,7 @@ export function Analyze() {
       timeframe: timeframe ?? undefined,
       screenshots: images,
       notes: notes.trim() || undefined,
+      plan_id: planId ?? undefined,
     });
     setTab("journal");
     setLogFormOpen(true);

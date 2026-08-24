@@ -1,4 +1,4 @@
-/** Cumulative P&L curve: muted green, gradient area fill, gridlines, optional date axis. */
+/** Cumulative P&L curve: muted green, gradient fill, $ y-axis, date x-axis. */
 export function EquityCurve({
   points,
   labels,
@@ -9,19 +9,25 @@ export function EquityCurve({
   const w = 300;
   const chartH = 96;
   const hasLabels = !!labels && labels.length === points.length && points.length > 1;
-  const h = hasLabels ? chartH + 14 : chartH;
-  const pad = 6;
+  const h = hasLabels ? chartH + 12 : chartH;
+  const padL = 30; // room for $ axis labels
+  const padR = 8;
+  const padY = 6;
   const min = Math.min(...points, 0);
   const max = Math.max(...points, 0);
   const span = max - min || 1;
-  const step = (w - pad * 2) / (points.length - 1);
-  const y = (v: number) => chartH - pad - ((v - min) / span) * (chartH - pad * 2);
-  const xy = points.map((v, i) => [pad + i * step, y(v)] as const);
+  const step = (w - padL - padR) / (points.length - 1);
+  const y = (v: number) => chartH - padY - ((v - min) / span) * (chartH - padY * 2);
+  const xy = points.map((v, i) => [padL + i * step, y(v)] as const);
   const line = xy.map(([x, yy], i) => `${i ? "L" : "M"}${x.toFixed(1)},${yy.toFixed(1)}`).join(" ");
-  const area = `${line} L${xy[xy.length - 1][0].toFixed(1)},${(chartH - pad).toFixed(1)} L${pad},${(chartH - pad).toFixed(1)} Z`;
+  const area = `${line} L${xy[xy.length - 1][0].toFixed(1)},${(chartH - padY).toFixed(1)} L${padL},${(chartH - padY).toFixed(1)} Z`;
   const zeroY = y(0);
   const last = xy[xy.length - 1];
   const stroke = "#2aa876"; // muted emerald — readable on both themes without glare
+
+  const money = (v: number) => `${v < 0 ? "-" : ""}$${Math.abs(Math.round(v))}`;
+  // Y axis: top (max), mid, bottom (min) — the money scale.
+  const yTicks = [max, min + span / 2, min];
 
   // Up to 4 evenly spaced date labels.
   const labelIdx: number[] = [];
@@ -40,26 +46,34 @@ export function EquityCurve({
           <stop offset="100%" stopColor={stroke} stopOpacity="0" />
         </linearGradient>
       </defs>
-      {[0.25, 0.5, 0.75].map((f) => {
-        const gy = pad + f * (chartH - pad * 2);
-        return (
+      {yTicks.map((v, i) => (
+        <g key={i}>
           <line
-            key={f}
-            x1={pad}
-            x2={w - pad}
-            y1={gy}
-            y2={gy}
+            x1={padL}
+            x2={w - padR}
+            y1={y(v)}
+            y2={y(v)}
             stroke="var(--color-ink-700)"
             strokeWidth="0.6"
             strokeDasharray="2 4"
           />
-        );
-      })}
+          <text
+            x={padL - 4}
+            y={y(v) + 2.5}
+            textAnchor="end"
+            fontSize="6"
+            fontWeight="600"
+            className="fill-(--color-ink-400)"
+          >
+            {money(v)}
+          </text>
+        </g>
+      ))}
       <path d={area} fill="url(#eqfill)" />
       {min < 0 && max > 0 && (
         <line
-          x1={pad}
-          x2={w - pad}
+          x1={padL}
+          x2={w - padR}
           y1={zeroY}
           y2={zeroY}
           stroke="var(--color-ink-600)"
@@ -77,28 +91,6 @@ export function EquityCurve({
       />
       <circle cx={last[0]} cy={last[1]} r="3.5" fill={stroke} />
       <circle cx={last[0]} cy={last[1]} r="6.5" fill={stroke} opacity="0.2" />
-      <text
-        x={w - pad}
-        y={y(max) + 3}
-        textAnchor="end"
-        fontSize="7"
-        fontWeight="700"
-        className="fill-(--color-ink-300)"
-      >
-        {max > 0 ? `+$${Math.round(max)}` : `$${Math.round(max)}`}
-      </text>
-      {min < 0 && (
-        <text
-          x={w - pad}
-          y={y(min) - 2}
-          textAnchor="end"
-          fontSize="7"
-          fontWeight="700"
-          className="fill-(--color-ink-300)"
-        >
-          -${Math.abs(Math.round(min))}
-        </text>
-      )}
       {hasLabels &&
         labelIdx.map((idx, i) => (
           <text
@@ -106,7 +98,7 @@ export function EquityCurve({
             x={xy[idx][0]}
             y={h - 3}
             textAnchor={i === 0 ? "start" : i === labelIdx.length - 1 ? "end" : "middle"}
-            fontSize="7"
+            fontSize="5.5"
             className="fill-(--color-ink-400)"
           >
             {labels?.[idx]}

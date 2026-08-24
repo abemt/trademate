@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card } from "../components/Card";
 import { EquityCurve } from "../components/EquityCurve";
+import { type Plan } from "../components/PlansSheet";
 import {
   IconClock,
   IconGauge,
@@ -335,6 +336,58 @@ function MistakesCostCard({ trades }: { trades: Trade[] }) {
   );
 }
 
+/** Which written plan actually has an edge. */
+function PlanPerformanceCard({ trades }: { trades: Trade[] }) {
+  const [plans, setPlans] = useState<Plan[]>([]);
+  useEffect(() => {
+    api<{ plans: Plan[] }>("/plans")
+      .then((r) => setPlans(r.plans))
+      .catch(() => {});
+  }, []);
+
+  const closed = trades.filter(
+    (t) => !t.deleted && t.status === "closed" && t.pnl_usd !== null && t.plan_id,
+  );
+  const agg = new Map<string, { n: number; wins: number; netR: number; netUsd: number }>();
+  for (const t of closed) {
+    const a = agg.get(t.plan_id as string) ?? { n: 0, wins: 0, netR: 0, netUsd: 0 };
+    a.n++;
+    if ((t.pnl_usd ?? 0) > 0) a.wins++;
+    a.netR += t.r_multiple ?? 0;
+    a.netUsd += t.pnl_usd ?? 0;
+    agg.set(t.plan_id as string, a);
+  }
+  const rows = [...agg.entries()].sort((a, b) => b[1].netR - a[1].netR);
+  if (rows.length === 0) return null;
+
+  return (
+    <Card title="Plan performance" icon={<IconStats />} badge="which edge is real">
+      <ul className="space-y-3">
+        {rows.map(([id, a]) => {
+          const wr = Math.round((100 * a.wins) / a.n);
+          const name = plans.find((p) => p.id === id)?.name ?? "Archived plan";
+          return (
+            <li key={id}>
+              <div className="mb-1 flex items-baseline justify-between text-sm">
+                <span className="text-ink-200">
+                  {name} <span className="text-[10px] text-ink-400">· {a.n} trade{a.n === 1 ? "" : "s"}</span>
+                </span>
+                <span className={`text-xs font-bold ${a.netUsd > 0 ? "text-up" : a.netUsd < 0 ? "text-down" : "text-ink-300"}`}>
+                  {fmtR(a.netR)} · {fmtUsd(a.netUsd)}
+                </span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-ink-700">
+                <div className="h-full rounded-full bg-gold-500/80" style={{ width: `${wr}%` }} />
+              </div>
+              <p className="mt-0.5 text-[10px] text-ink-400">{wr}% win rate</p>
+            </li>
+          );
+        })}
+      </ul>
+    </Card>
+  );
+}
+
 const WEEKDAYS = ["M", "T", "W", "T", "F", "S", "S"];
 
 interface DayAgg {
@@ -350,6 +403,27 @@ function MonthCalendar({ trades, maxPerDay }: { trades: Trade[]; maxPerDay: numb
   });
   const [selected, setSelected] = useState<string | null>(null);
   const [viewer, setViewer] = useState<string | null>(null);
+  const [dayRoutine, setDayRoutine] = useState<{ done: number; note: string | null } | null>(null);
+
+  useEffect(() => {
+    setDayRoutine(null);
+    if (!selected) return;
+    let cancelled = false;
+    api<{ routine: { done: string; note: string | null } | null }>(`/routine?date=${selected}`)
+      .then((r) => {
+        if (cancelled || !r.routine) return;
+        try {
+          const arr = JSON.parse(r.routine.done ?? "[]");
+          setDayRoutine({ done: Array.isArray(arr) ? arr.length : 0, note: r.routine.note });
+        } catch {
+          setDayRoutine({ done: 0, note: r.routine.note });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
 
   const byDay = useMemo(() => {
     const map = new Map<string, DayAgg>();
@@ -590,6 +664,48 @@ function MonthCalendar({ trades, maxPerDay }: { trades: Trade[]; maxPerDay: numb
       >
         {sel && (
           <div>
+            <div className="mb-3 flex flex-wrap gap-1.5">
+              <span
+                className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+                  sel.trades.length > maxPerDay
+                    ? "border-down/40 bg-down/10 text-down"
+                    : "border-up/40 bg-up/10 text-up"
+                }`}
+              >
+                {sel.trades.length > maxPerDay ? "over trade cap" : "within trade cap"}
+              </span>
+              {(() => {
+                const withPlanFlag = sel.trades.filter((t) => t.followed_plan !== null);
+                if (!withPlanFlag.length) return null;
+                const followed = withPlanFlag.filter((t) => t.followed_plan === 1).length;
+                const all = followed === withPlanFlag.length;
+                return (
+                  <span
+                    className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+                      all ? "border-up/40 bg-up/10 text-up" : "border-down/40 bg-down/10 text-down"
+                    }`}
+                  >
+                    plan followed {followed}/{withPlanFlag.length}
+                  </span>
+                );
+              })()}
+              {dayRoutine && (
+                <span
+                  className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+                    dayRoutine.done >= 4
+                      ? "border-up/40 bg-up/10 text-up"
+                      : "border-gold-500/40 bg-gold-500/10 text-gold-400"
+                  }`}
+                >
+                  routine {Math.min(dayRoutine.done, 4)}/4
+                </span>
+              )}
+            </div>
+            {dayRoutine?.note && (
+              <p className="mb-3 rounded-xl border border-white/10 bg-ink-800/60 p-2.5 text-xs leading-relaxed text-ink-200">
+                {dayRoutine.note}
+              </p>
+            )}
             <div className="mb-4 grid grid-cols-3 gap-2 text-center">
               <div className="rounded-xl bg-ink-800/70 p-3">
                 <p className="text-[10px] uppercase tracking-wider text-ink-400">P&L</p>
@@ -974,6 +1090,8 @@ export function Stats() {
       <NervousSystemCard trades={trades} />
 
       <MistakesCostCard trades={trades} />
+
+      <PlanPerformanceCard trades={trades} />
 
       <MonthlyProgress trades={trades} />
 

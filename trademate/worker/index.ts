@@ -105,6 +105,7 @@ const TRADE_FIELDS = [
   "followed_plan", "notes", "opened_at", "closed_at", "updated_at", "deleted",
   "body_before", "urge_before", "body_during", "exit_feeling", "autopilot",
   "account_id", "feeling_note", "setup_grade", "execution_quality", "confluences", "mistakes",
+  "plan_id",
 ] as const;
 
 const UPSERT_TRADE_SQL = `
@@ -182,6 +183,7 @@ function cleanTrade(x: Record<string, unknown>): Record<string, unknown> | null 
     execution_quality: str(x.execution_quality, 12),
     confluences: strArr(x.confluences, 10),
     mistakes: strArr(x.mistakes, 10),
+    plan_id: str(x.plan_id, 64),
   };
 }
 
@@ -217,6 +219,40 @@ app.post("/routine", async (c) => {
     .bind(b.date, done, note)
     .run();
   return c.json({ ok: true });
+});
+
+// ---------- briefing accuracy ----------
+
+app.get("/briefing/accuracy", async (c) => {
+  try {
+    const { results } = await c.env.DB.prepare(
+      "SELECT key, json FROM briefings WHERE kind = 'daily' ORDER BY key ASC LIMIT 60",
+    ).all<{ key: string; json: string }>();
+    const days = results
+      .map((r) => {
+        try {
+          const b = JSON.parse(r.json) as { price?: number | null; analysis?: { bias?: string } };
+          return { key: r.key, price: b.price ?? null, bias: (b.analysis?.bias ?? "neutral").toLowerCase() };
+        } catch {
+          return null;
+        }
+      })
+      .filter((d): d is { key: string; price: number | null; bias: string } => !!d && d.price !== null);
+    // A call is graded against the move to the NEXT morning's price.
+    let hits = 0;
+    let calls = 0;
+    for (let i = 0; i < days.length - 1; i++) {
+      const bias = days[i].bias;
+      if (bias !== "bullish" && bias !== "bearish") continue;
+      const delta = (days[i + 1].price as number) - (days[i].price as number);
+      if (Math.abs(delta) < 0.01) continue;
+      calls++;
+      if ((bias === "bullish" && delta > 0) || (bias === "bearish" && delta < 0)) hits++;
+    }
+    return c.json({ calls, hits, pct: calls > 0 ? Math.round((100 * hits) / calls) : null });
+  } catch {
+    return c.json({ calls: 0, hits: 0, pct: null });
+  }
 });
 
 // ---------- playbook (trade plans) ----------

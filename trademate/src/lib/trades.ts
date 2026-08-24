@@ -43,6 +43,8 @@ export interface Trade {
   execution_quality: string | null;
   confluences: string[];
   mistakes: string[];
+  /** Playbook plan this trade was taken under. */
+  plan_id: string | null;
 }
 
 export interface Account {

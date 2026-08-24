@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Chip, ChipRow, FieldLabel } from "./Chip";
 import { IconTrendDown, IconTrendUp } from "./Icons";
+import { PlansSheet, type Plan } from "./PlansSheet";
 import { ScreenshotPicker } from "./ScreenshotPicker";
 import { Sheet } from "./Sheet";
+import { api } from "../lib/api";
 import { useApp } from "../lib/store";
 import {
   BODY_SCALE,
@@ -118,6 +120,9 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
   const [execQuality, setExecQuality] = useState<string | null>(base?.execution_quality ?? null);
   const [confluences, setConfluences] = useState<string[]>(base?.confluences ?? []);
   const [mistakes, setMistakes] = useState<string[]>(base?.mistakes ?? []);
+  const [planId, setPlanId] = useState<string | null>(base?.plan_id ?? null);
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [plansOpen, setPlansOpen] = useState(false);
   const [autopilot, setAutopilot] = useState<number | null>(
     existing?.autopilot ?? prefill?.autopilot ?? null,
   );
@@ -125,6 +130,15 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
 
   const riskUsd = Math.round(((accountSize * riskPct) / 100) * 100) / 100;
   const lots = Math.max(0.01, Math.floor((riskUsd / (slPips * 10)) * 100) / 100);
+
+  function loadPlans() {
+    api<{ plans: Plan[] }>("/plans")
+      .then((r) => setPlans(r.plans))
+      .catch(() => {});
+  }
+  useEffect(() => {
+    loadPlans();
+  }, []);
 
   function toggleEmotion(id: string) {
     setEmotions((prev) =>
@@ -205,6 +219,7 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
       execution_quality: isClosed ? execQuality : null,
       confluences,
       mistakes: isClosed ? mistakes : [],
+      plan_id: planId,
     };
     void saveTrade(trade);
     onClose();
@@ -284,6 +299,30 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
             className="mt-2 w-full rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60"
           />
         )}
+      </div>
+
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <FieldLabel>Playbook plan</FieldLabel>
+          <button
+            type="button"
+            onClick={() => setPlansOpen(true)}
+            className="text-[11px] font-bold text-gold-500 hover:text-gold-400"
+          >
+            Manage ›
+          </button>
+        </div>
+        <ChipRow>
+          <Chip active={planId === null} onClick={() => setPlanId(null)}>
+            No plan
+          </Chip>
+          {plans.map((p) => (
+            <Chip key={p.id} active={planId === p.id} onClick={() => setPlanId(p.id)}>
+              {p.name}
+            </Chip>
+          ))}
+        </ChipRow>
+        <PlansSheet open={plansOpen} onClose={() => setPlansOpen(false)} plans={plans} onChanged={loadPlans} />
       </div>
 
       <div>

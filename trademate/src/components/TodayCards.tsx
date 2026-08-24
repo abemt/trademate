@@ -122,12 +122,16 @@ export function BriefingCard() {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState(false);
+  const [accuracy, setAccuracy] = useState<{ calls: number; pct: number | null } | null>(null);
 
   useEffect(() => {
     api<{ briefing: Briefing | null }>("/briefing")
       .then((r) => setBriefing(r.briefing))
       .catch(() => {})
       .finally(() => setLoading(false));
+    api<{ calls: number; hits: number; pct: number | null }>("/briefing/accuracy")
+      .then((r) => setAccuracy(r))
+      .catch(() => {});
   }, []);
 
   async function generate() {
@@ -146,9 +150,13 @@ export function BriefingCard() {
 
   const a = briefing?.analysis;
   const bias = (a?.bias ?? "neutral").toLowerCase();
+  const accuracyLine =
+    accuracy && accuracy.pct !== null && accuracy.calls >= 3
+      ? `directional calls: ${accuracy.pct}% right over ${accuracy.calls}`
+      : null;
 
   return (
-    <Card title="Daily briefing" icon={<IconNews />} badge={briefing ? briefing.date : "XAUUSD"}>
+    <Card title="Daily briefing" icon={<IconNews />} badge={accuracyLine ?? (briefing ? briefing.date : "XAUUSD")}>
       {loading ? (
         <p className="text-sm text-ink-400">Checking…</p>
       ) : !briefing ? (
