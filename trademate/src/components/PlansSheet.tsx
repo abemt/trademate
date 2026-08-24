@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api } from "../lib/api";
-import { Chip, ChipRow, FieldLabel } from "./Chip";
+import { FieldLabel } from "./Chip";
 import { ScreenshotPicker } from "./ScreenshotPicker";
 import { Sheet } from "./Sheet";
 
