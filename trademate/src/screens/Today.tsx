@@ -18,12 +18,14 @@ import {
 } from "../components/TodayCards";
 import { useApp } from "../lib/store";
 import {
+  SETUPS,
   accountTrades,
   computeStats,
   currentBalance,
   fmtR,
   fmtUsd,
   localDateKey,
+  optionLabel,
 } from "../lib/trades";
 import { EquityCurve } from "../components/EquityCurve";
 import {
@@ -249,6 +251,27 @@ function DashboardStats() {
     acctTrades,
   );
 
+  // Dated cumulative curve for the selected range.
+  const { curvePts, curveLabels } = useMemo(() => {
+    const closed = ranged
+      .filter((t) => !t.deleted && t.status === "closed" && t.pnl_usd !== null)
+      .sort((a, b) => (a.closed_at ?? a.opened_at).localeCompare(b.closed_at ?? b.opened_at));
+    let run = 0;
+    const pts: number[] = [];
+    const lbls: string[] = [];
+    for (const t of closed) {
+      run += t.pnl_usd ?? 0;
+      pts.push(Math.round(run * 100) / 100);
+      lbls.push(
+        new Date(t.closed_at ?? t.opened_at).toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+        }),
+      );
+    }
+    return { curvePts: pts, curveLabels: lbls };
+  }, [ranged]);
+
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-1.5 overflow-x-auto">
@@ -290,8 +313,8 @@ function DashboardStats() {
         />
       </div>
       <Card title="Equity" icon={<IconGauge />} badge={`cumulative $ · ${RANGES.find((r) => r.id === range)?.label}`}>
-        {s.equity.length > 2 ? (
-          <EquityCurve points={s.equity} />
+        {curvePts.length > 2 ? (
+          <EquityCurve points={curvePts} labels={curveLabels} />
         ) : (
           <p className="py-4 text-center text-sm text-ink-400">
             Close a few trades in this range and the curve draws itself.
@@ -455,6 +478,74 @@ function PropGuard() {
   );
 }
 
+function RecentTrades() {
+  const allTrades = useApp((s) => s.trades);
+  const accounts = useApp((s) => s.accounts);
+  const setTab = useApp((s) => s.setTab);
+  const active = accounts.find((a) => a.active === 1 && a.archived === 0) ?? null;
+  const recent = useMemo(
+    () =>
+      accountTrades(allTrades, active?.id ?? null)
+        .filter((t) => !t.deleted)
+        .slice(0, 5),
+    [allTrades, active?.id],
+  );
+
+  return (
+    <Card title="Recent trades" icon={<IconCoin />} badge="last 5">
+      {recent.length === 0 ? (
+        <p className="py-2 text-center text-sm text-ink-400">
+          Nothing logged yet — the journal is hungry.
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {recent.map((t) => {
+            const long = t.direction === "long";
+            const pnl = t.pnl_usd ?? 0;
+            return (
+              <li
+                key={t.id}
+                className="flex items-center gap-2.5 rounded-xl border border-white/5 bg-ink-800/60 px-3 py-2"
+              >
+                <span
+                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${
+                    long ? "bg-up/10 text-up" : "bg-down/10 text-down"
+                  }`}
+                >
+                  {long ? <IconTrendUp className="h-3.5 w-3.5" /> : <IconTrendDown className="h-3.5 w-3.5" />}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-semibold text-white">
+                    {optionLabel(SETUPS, t.setup_type) ?? t.setup_type ?? "Trade"}
+                  </p>
+                  <p className="text-[10px] text-ink-400">
+                    {new Date(t.opened_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                    {t.timeframe ? ` · ${t.timeframe}` : ""}
+                  </p>
+                </div>
+                {t.status === "open" ? (
+                  <span className="text-[10px] font-bold uppercase text-gold-400">open</span>
+                ) : (
+                  <span className={`text-xs font-bold ${pnl > 0 ? "text-up" : pnl < 0 ? "text-down" : "text-ink-300"}`}>
+                    {t.r_multiple !== null ? fmtR(t.r_multiple) : fmtUsd(pnl)}
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <button
+        type="button"
+        onClick={() => setTab("journal")}
+        className="mt-2.5 w-full rounded-lg border border-white/10 bg-ink-800 py-1.5 text-[11px] font-semibold text-ink-300 transition hover:text-gold-400"
+      >
+        All trades ›
+      </button>
+    </Card>
+  );
+}
+
 export function Today() {
   const now = useNow();
   const accounts = useApp((s) => s.accounts);
@@ -466,6 +557,7 @@ export function Today() {
       <DashboardStats />
       <div className="space-y-4 lg:grid lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start lg:gap-4 lg:space-y-0">
         <div className="space-y-4">
+          <RecentTrades />
           <BriefingCard />
           <NewsWatchCard />
           <RiskCalc />
