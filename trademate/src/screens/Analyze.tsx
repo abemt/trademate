@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card } from "../components/Card";
 import { Chip, ChipRow, FieldLabel } from "../components/Chip";
 import { IconCrosshair, IconTrendDown, IconTrendUp } from "../components/Icons";
+import { PlansSheet, type Plan } from "../components/PlansSheet";
 import { ScreenshotPicker } from "../components/ScreenshotPicker";
 import { api } from "../lib/api";
 import { useApp } from "../lib/store";
@@ -47,6 +48,18 @@ export function Analyze() {
   const [error, setError] = useState("");
   const [result, setResult] = useState<{ id: string; analysis: Analysis } | null>(null);
   const [decision, setDecision] = useState<"taken" | "skipped" | null>(null);
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [planId, setPlanId] = useState<string | null>(null);
+  const [plansOpen, setPlansOpen] = useState(false);
+
+  function loadPlans() {
+    api<{ plans: Plan[] }>("/plans")
+      .then((r) => setPlans(r.plans))
+      .catch(() => {});
+  }
+  useEffect(() => {
+    loadPlans();
+  }, []);
 
   const finalSetup = setup === "other" && customSetup.trim() ? customSetup.trim() : setup;
 
@@ -72,6 +85,7 @@ export function Analyze() {
           sl: sl.trim() || undefined,
           tp: tp.trim() || undefined,
           notes: notes.trim() || undefined,
+          plan_id: planId ?? undefined,
         }),
       });
       setResult(r);
@@ -117,6 +131,41 @@ export function Analyze() {
           Show Mate the chart before you click buy or sell.
         </p>
       </div>
+
+      <div className="rounded-2xl border border-white/5 bg-ink-900/90 p-4 shadow-[var(--card-shadow)]">
+        <div className="mb-2 flex items-center justify-between">
+          <FieldLabel>Trade plan — grading rubric</FieldLabel>
+          <button
+            type="button"
+            onClick={() => setPlansOpen(true)}
+            className="text-[11px] font-bold text-gold-500 hover:text-gold-400"
+          >
+            Manage playbook ›
+          </button>
+        </div>
+        <ChipRow>
+          <Chip active={planId === null} onClick={() => setPlanId(null)}>
+            No plan
+          </Chip>
+          {plans.map((p) => (
+            <Chip key={p.id} active={planId === p.id} onClick={() => setPlanId(p.id)}>
+              {p.name}
+            </Chip>
+          ))}
+        </ChipRow>
+        {planId !== null && (
+          <p className="mt-2 text-[11px] text-ink-400">
+            Mate will grade this setup against the plan's entry criteria — a good trade outside
+            the plan is still a broken plan.
+          </p>
+        )}
+      </div>
+      <PlansSheet
+        open={plansOpen}
+        onClose={() => setPlansOpen(false)}
+        plans={plans}
+        onChanged={loadPlans}
+      />
 
       <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
       <Card title="Your setup" icon={<IconCrosshair />}>

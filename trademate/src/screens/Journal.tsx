@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { IconPlus, IconTrash, IconTrendDown, IconTrendUp } from "../components/Icons";
+import { NotebookSheet } from "../components/NotebookSheet";
 import { TradeForm } from "../components/TradeForm";
 import { screenshotUrl } from "../lib/images";
 import { useApp } from "../lib/store";
@@ -196,6 +197,7 @@ export function Journal() {
   const [closeMode, setCloseMode] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [viewer, setViewer] = useState<string | null>(null);
+  const [notebookOpen, setNotebookOpen] = useState(false);
 
   const groups = useMemo(() => {
     const map = new Map<string, Trade[]>();
@@ -228,14 +230,25 @@ export function Journal() {
           <h1 className="text-2xl font-bold text-white">Journal</h1>
           <p className="mt-1 text-sm text-ink-300">Log it in 20 seconds. Patterns beat shame.</p>
         </div>
-        <button
-          type="button"
-          onClick={() => openForm(null)}
-          className="flex items-center gap-1.5 rounded-xl bg-gold-500 px-3.5 py-2.5 text-sm font-bold text-ink-950 transition hover:bg-gold-400"
-        >
-          <IconPlus className="h-4 w-4" /> Log trade
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setNotebookOpen(true)}
+            className="rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm font-bold text-ink-300 transition hover:text-gold-400"
+          >
+            Notebook
+          </button>
+          <button
+            type="button"
+            onClick={() => openForm(null)}
+            className="flex items-center gap-1.5 rounded-xl bg-gold-500 px-3.5 py-2.5 text-sm font-bold text-ink-950 transition hover:bg-gold-400"
+          >
+            <IconPlus className="h-4 w-4" /> Log trade
+          </button>
+        </div>
       </div>
+
+      <NotebookSheet open={notebookOpen} onClose={() => setNotebookOpen(false)} trades={trades} />
 
       {trades.length === 0 && (
         <div className="rounded-2xl border border-dashed border-white/10 bg-ink-900/60 p-8 text-center">

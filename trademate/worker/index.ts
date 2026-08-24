@@ -219,6 +219,105 @@ app.post("/routine", async (c) => {
   return c.json({ ok: true });
 });
 
+// ---------- playbook (trade plans) ----------
+
+app.get("/plans", async (c) => {
+  try {
+    const { results } = await c.env.DB.prepare(
+      "SELECT * FROM plans WHERE archived = 0 ORDER BY created_at ASC",
+    ).all();
+    return c.json({ plans: results });
+  } catch {
+    return c.json({ plans: [] });
+  }
+});
+
+app.post("/plans", async (c) => {
+  const b = await c.req.json<Record<string, unknown>>().catch(() => null);
+  if (!b) return c.json({ error: "Bad payload" }, 400);
+  const name =
+    typeof b.name === "string" && b.name.trim() ? b.name.trim().slice(0, 80) : null;
+  if (!name) return c.json({ error: "Plan name required" }, 400);
+  const arr = (v: unknown, max: number) =>
+    JSON.stringify(
+      Array.isArray(v)
+        ? v.filter((x) => typeof x === "string" && x.trim()).map((x) => (x as string).slice(0, 200)).slice(0, max)
+        : [],
+    );
+  const txt = (v: unknown, max: number) =>
+    typeof v === "string" && v.trim() ? v.slice(0, max) : null;
+  const id =
+    typeof b.id === "string" && b.id ? b.id.slice(0, 64) : `plan-${crypto.randomUUID().slice(0, 8)}`;
+  await c.env.DB.prepare(
+    `INSERT INTO plans (id, name, plan_type, charting_process, entry_criteria, management_rules, exit_criteria, notes, screenshots)
+     VALUES (?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(id) DO UPDATE SET name=excluded.name, plan_type=excluded.plan_type,
+       charting_process=excluded.charting_process, entry_criteria=excluded.entry_criteria,
+       management_rules=excluded.management_rules, exit_criteria=excluded.exit_criteria,
+       notes=excluded.notes, screenshots=excluded.screenshots, updated_at=datetime('now')`,
+  )
+    .bind(
+      id,
+      name,
+      txt(b.plan_type, 60),
+      arr(b.charting_process, 10),
+      arr(b.entry_criteria, 10),
+      txt(b.management_rules, 2000),
+      arr(b.exit_criteria, 10),
+      txt(b.notes, 2000),
+      arr(b.screenshots, 4),
+    )
+    .run();
+  return c.json({ id });
+});
+
+app.post("/plans/archive", async (c) => {
+  const b = await c.req.json<{ id?: string }>().catch(() => null);
+  if (!b?.id) return c.json({ error: "id required" }, 400);
+  await c.env.DB.prepare("UPDATE plans SET archived = 1 WHERE id = ?").bind(b.id).run();
+  return c.json({ ok: true });
+});
+
+// ---------- notebook ----------
+
+app.get("/notes", async (c) => {
+  try {
+    const { results } = await c.env.DB.prepare(
+      "SELECT id, kind, title, body, updated_at FROM notes ORDER BY updated_at DESC LIMIT 200",
+    ).all();
+    return c.json({ notes: results });
+  } catch {
+    return c.json({ notes: [] });
+  }
+});
+
+app.post("/notes", async (c) => {
+  const b = await c.req.json<Record<string, unknown>>().catch(() => null);
+  if (!b) return c.json({ error: "Bad payload" }, 400);
+  const id =
+    typeof b.id === "string" && b.id ? b.id.slice(0, 64) : `note-${crypto.randomUUID().slice(0, 8)}`;
+  const kind = ["daily", "weekly", "monthly", "free"].includes(String(b.kind))
+    ? String(b.kind)
+    : "free";
+  const title =
+    typeof b.title === "string" && b.title.trim() ? b.title.trim().slice(0, 120) : "Untitled";
+  const bodyTxt = typeof b.body === "string" ? b.body.slice(0, 20000) : "";
+  await c.env.DB.prepare(
+    `INSERT INTO notes (id, kind, title, body) VALUES (?,?,?,?)
+     ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, title=excluded.title, body=excluded.body, updated_at=datetime('now')`,
+  )
+    .bind(id, kind, title, bodyTxt)
+    .run();
+  return c.json({ id });
+});
+
+app.post("/notes/delete", async (c) => {
+  const b = await c.req.json<{ id?: string }>().catch(() => null);
+  if (!b?.id) return c.json({ error: "id required" }, 400);
+  await c.env.DB.prepare("DELETE FROM notes WHERE id = ?").bind(b.id).run();
+  return c.json({ ok: true });
+});
+
 // ---------- accounts ----------
 
 const ACCOUNT_TYPES = ["personal", "prop_eval", "prop_funded", "demo"];
@@ -417,6 +516,7 @@ app.post("/analyze", async (c) => {
       sl?: string;
       tp?: string;
       notes?: string;
+      plan_id?: string;
     }>()
     .catch(() => null);
   if (!body) return c.json({ error: "Bad payload" }, 400);
@@ -445,6 +545,45 @@ app.post("/analyze", async (c) => {
   }
 
   const ctx = await traderContext(c.env);
+
+  // Grade against his own written plan when one is selected.
+  let planBlock = "";
+  if (typeof body.plan_id === "string" && body.plan_id) {
+    try {
+      const p = await c.env.DB.prepare("SELECT * FROM plans WHERE id = ? AND archived = 0")
+        .bind(body.plan_id.slice(0, 64))
+        .first<Record<string, string | null>>();
+      if (p) {
+        const lines = (raw: string | null) => {
+          try {
+            const a = JSON.parse(raw ?? "[]");
+            return Array.isArray(a) ? a.filter((x) => typeof x === "string") : [];
+          } catch {
+            return [];
+          }
+        };
+        const proc = lines(p.charting_process);
+        const entry = lines(p.entry_criteria);
+        const exits = lines(p.exit_criteria);
+        planBlock = [
+          `HIS WRITTEN TRADE PLAN — "${p.name}"${p.plan_type ? ` (${p.plan_type})` : ""}. Grade STRICTLY against it:`,
+          proc.length ? `Charting process: ${proc.map((s, i) => `${i + 1}) ${s}`).join(" ")}` : "",
+          entry.length
+            ? `Entry criteria — the checklist array MUST use exactly these as its items (plus "R:R at least 1:1.5" and "Regime fit"): ${entry.join(" · ")}`
+            : "",
+          p.management_rules ? `Management rules: ${p.management_rules}` : "",
+          exits.length ? `Exit criteria: ${exits.join(" · ")}` : "",
+          p.notes ? `Plan notes: ${p.notes}` : "",
+          "If the chart doesn't satisfy the plan's entry criteria, the grade cannot be A — a good trade outside the plan is still a broken plan.",
+        ]
+          .filter(Boolean)
+          .join("\n");
+      }
+    } catch {
+      // plans table may not exist yet
+    }
+  }
+
   const idea = [
     `Analyze this XAUUSD setup idea${images.length ? " from the attached chart screenshot(s)" : ""}.`,
     body.direction ? `Direction: ${body.direction}.` : "",
@@ -454,6 +593,8 @@ app.post("/analyze", async (c) => {
     body.sl ? `SL: ${body.sl}.` : "",
     body.tp ? `TP: ${body.tp}.` : "",
     body.notes ? `His notes: ${body.notes}` : "",
+    "",
+    planBlock,
     "",
     "Be honest like a trader friend reviewing over his shoulder. Remember the regime is CHOPPY — penalize first-touch zone entries without confirmation. Verify his claimed setup actually exists on the chart.",
     ANALYZE_CONTRACT,
