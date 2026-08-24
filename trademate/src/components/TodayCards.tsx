@@ -461,6 +461,12 @@ export function CircuitBreakerCard() {
               style={{ width: `${Math.max(2, lossUsedPct)}%` }}
             />
           </div>
+          <p className="mt-2 flex items-baseline justify-between text-[11px]">
+            <span className="text-ink-400">Today's closed P&L</span>
+            <span className={`font-bold ${todayPnl > 0 ? "text-up" : todayPnl < 0 ? "text-down" : "text-ink-300"}`}>
+              {todayPnl === 0 ? "$0" : `${todayPnl > 0 ? "+" : "-"}$${Math.abs(Math.round(todayPnl))}`}
+            </span>
+          </p>
         </div>
       </section>
     );
