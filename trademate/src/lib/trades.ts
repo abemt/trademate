@@ -38,6 +38,11 @@ export interface Trade {
   account_id: string | null;
   /** Free-text: what he was actually feeling at entry, in his own words. */
   feeling_note: string | null;
+  /** Self-graded review at close-out. */
+  setup_grade: string | null;
+  execution_quality: string | null;
+  confluences: string[];
+  mistakes: string[];
 }
 
 export interface Account {
@@ -119,6 +124,35 @@ export const EXIT_FEELINGS: readonly Option[] = [
   { id: "angry", label: "Angry" },
   { id: "regret", label: "Regret" },
   { id: "numb", label: "Numb" },
+];
+
+export const SETUP_GRADES = ["A+", "A", "B", "C", "F"] as const;
+
+export const EXEC_QUALITY: readonly Option[] = [
+  { id: "excellent", label: "Excellent" },
+  { id: "good", label: "Good" },
+  { id: "average", label: "Average" },
+  { id: "poor", label: "Poor" },
+];
+
+export const CONFLUENCES: readonly Option[] = [
+  { id: "with_trend", label: "With trend" },
+  { id: "key_zone", label: "Key zone" },
+  { id: "confirmation", label: "Confirmation candle" },
+  { id: "session_timing", label: "Right session" },
+  { id: "news_clear", label: "No red news" },
+];
+
+export const MISTAKES: readonly Option[] = [
+  { id: "entered_early", label: "Entered early" },
+  { id: "no_confirmation", label: "No confirmation" },
+  { id: "moved_sl_fear", label: "Moved SL from fear" },
+  { id: "oversized", label: "Oversized" },
+  { id: "revenge", label: "Revenge entry" },
+  { id: "chased", label: "Chased after missing" },
+  { id: "overtraded", label: "Past daily cap" },
+  { id: "watched_1m", label: "Watched 1-min candles" },
+  { id: "clean", label: "None — clean loss" },
 ];
 
 export function optionLabel(list: readonly Option[], id: string | null): string | null {

@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
 import { TABS, useApp, type Tab } from "../lib/store";
+import { accountTrades, currentBalance } from "../lib/trades";
 import {
   IconCandles,
   IconChat,
@@ -21,6 +22,12 @@ const META: Record<Tab, { label: string; icon: typeof IconHome }> = {
 export function TabBar() {
   const tab = useApp((s) => s.tab);
   const setTab = useApp((s) => s.setTab);
+  const accounts = useApp((s) => s.accounts);
+  const trades = useApp((s) => s.trades);
+  const active = accounts.find((a) => a.active === 1 && a.archived === 0) ?? null;
+  const balance = active
+    ? currentBalance(active.starting_balance, accountTrades(trades, active.id))
+    : null;
 
   return (
     <>
@@ -57,7 +64,20 @@ export function TabBar() {
             );
           })}
         </nav>
-        <p className="mt-auto px-5 pb-5 text-[10px] text-ink-500">Process over P&L.</p>
+        <div className="mt-auto px-3 pb-5">
+          {active && (
+            <div className="mb-3 rounded-xl border border-white/10 bg-ink-900/70 p-3">
+              <p className="truncate text-xs font-semibold text-white">{active.label}</p>
+              <p className="text-[10px] text-ink-400">
+                live balance{" "}
+                <span className={`font-bold ${balance !== null && balance >= active.starting_balance ? "text-up" : "text-down"}`}>
+                  ${balance?.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                </span>
+              </p>
+            </div>
+          )}
+          <p className="px-2 text-[10px] text-ink-500">Process over P&L.</p>
+        </div>
       </aside>
 
       {/* Mobile: bottom tab bar */}

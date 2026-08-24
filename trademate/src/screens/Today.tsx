@@ -14,6 +14,7 @@ import {
   CircuitBreakerCard,
   DisciplineCard,
   NewsWatchCard,
+  RoutineCard,
 } from "../components/TodayCards";
 import { useApp } from "../lib/store";
 import { accountTrades, computeStats, currentBalance, localDateKey } from "../lib/trades";
@@ -327,6 +328,7 @@ export function Today() {
   return (
     <div className="space-y-4 lg:columns-2 lg:gap-4 lg:space-y-0 lg:[&>*]:mb-4 lg:[&>*]:break-inside-avoid">
       <Greeting now={now} />
+      <RoutineCard />
       <CircuitBreakerCard />
       <CheckinCard />
       <BriefingCard />

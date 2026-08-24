@@ -14,6 +14,7 @@ import { screenshotUrl } from "../lib/images";
 import { useApp } from "../lib/store";
 import {
   EMOTIONS,
+  MISTAKES,
   SETUPS,
   accountTrades,
   computeStats,
@@ -312,6 +313,60 @@ function BreakdownRows({ rows }: { rows: Breakdown[] }) {
   );
 }
 
+/** Every tagged mistake gets a price tag — the chart that turns honesty into money. */
+function MistakesCostCard({ trades }: { trades: Trade[] }) {
+  const closed = trades.filter(
+    (t) => !t.deleted && t.status === "closed" && t.pnl_usd !== null,
+  );
+  const agg = new Map<string, { n: number; netR: number; netUsd: number }>();
+  for (const t of closed) {
+    for (const m of t.mistakes ?? []) {
+      if (m === "clean") continue;
+      const a = agg.get(m) ?? { n: 0, netR: 0, netUsd: 0 };
+      a.n++;
+      a.netR += t.r_multiple ?? 0;
+      a.netUsd += t.pnl_usd ?? 0;
+      agg.set(m, a);
+    }
+  }
+  const rows = [...agg.entries()].sort((a, b) => a[1].netUsd - b[1].netUsd);
+  const maxAbs = Math.max(1, ...rows.map(([, a]) => Math.abs(a.netUsd)));
+
+  return (
+    <Card title="What mistakes cost me" icon={<IconTrendDown />} badge="price tags on habits">
+      {rows.length === 0 ? (
+        <p className="text-sm leading-relaxed text-ink-300">
+          Tag mistakes when you close trades and this becomes your most valuable chart: each
+          recurring habit — moved SL from fear, revenge entry, entered early — with the exact
+          amount it has cost you. You can't fix what you haven't priced.
+        </p>
+      ) : (
+        <ul className="space-y-3">
+          {rows.map(([id, a]) => (
+            <li key={id}>
+              <div className="mb-1 flex items-baseline justify-between text-sm">
+                <span className="text-ink-200">
+                  {optionLabel(MISTAKES, id) ?? id}{" "}
+                  <span className="text-[10px] text-ink-400">· {a.n}×</span>
+                </span>
+                <span className={`text-xs font-bold ${a.netUsd < 0 ? "text-down" : "text-up"}`}>
+                  {fmtR(a.netR)} · {fmtUsd(a.netUsd)}
+                </span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-ink-700">
+                <div
+                  className={`h-full rounded-full ${a.netUsd < 0 ? "bg-down/70" : "bg-up/70"}`}
+                  style={{ width: `${Math.max(4, (Math.abs(a.netUsd) / maxAbs) * 100)}%` }}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
 const WEEKDAYS = ["M", "T", "W", "T", "F", "S", "S"];
 
 interface DayAgg {
@@ -413,51 +468,80 @@ function MonthCalendar({ trades, maxPerDay }: { trades: Trade[]; maxPerDay: numb
         </button>
       </div>
 
-      <div className="grid grid-cols-7 gap-1.5 text-center sm:gap-2">
-        {WEEKDAYS.map((d, i) => (
-          <span key={i} className="py-1 text-[10px] font-bold uppercase tracking-wider text-ink-400 sm:text-xs">
-            {d}
-          </span>
-        ))}
-        {keys.map((k, i) => {
-          if (!k) return <span key={`b${i}`} />;
-          const agg = byDay.get(k);
-          const dayNum = Number(k.slice(8));
-          const over = (agg?.trades.length ?? 0) > maxPerDay;
-          let bg: string | undefined;
-          if (agg && agg.closedCount > 0 && agg.pnl !== 0) {
-            const alpha = 0.2 + 0.55 * (Math.abs(agg.pnl) / maxAbs);
-            bg = agg.pnl > 0 ? `rgba(52,211,153,${alpha})` : `rgba(248,113,113,${alpha})`;
-          }
+      <div className="space-y-1.5 sm:space-y-2">
+        <div className="grid grid-cols-7 gap-1.5 text-center sm:grid-cols-8 sm:gap-2">
+          {WEEKDAYS.map((d, i) => (
+            <span key={i} className="py-1 text-[10px] font-bold uppercase tracking-wider text-ink-400 sm:text-xs">
+              {d}
+            </span>
+          ))}
+          <span className="hidden py-1 text-xs font-bold uppercase tracking-wider text-gold-500 sm:block">Wk</span>
+        </div>
+        {Array.from({ length: Math.ceil(keys.length / 7) }, (_, w) => {
+          const week = keys.slice(w * 7, w * 7 + 7);
+          while (week.length < 7) week.push(null);
+          const weekAggs = week
+            .filter((k): k is string => k !== null)
+            .map((k) => byDay.get(k))
+            .filter((a): a is DayAgg => !!a);
+          const wkPnl = weekAggs.reduce((s2, a) => s2 + a.pnl, 0);
+          const wkClosed = weekAggs.reduce((s2, a) => s2 + a.closedCount, 0);
           return (
-            <button
-              key={k}
-              type="button"
-              disabled={!agg}
-              onClick={() => setSelected(k)}
-              style={bg ? { backgroundColor: bg } : undefined}
-              className={`relative flex min-h-12 flex-col items-center justify-center rounded-xl text-xs font-semibold transition sm:min-h-16 sm:text-sm lg:min-h-20 ${
-                agg ? "text-white hover:scale-105" : "text-ink-600"
-              } ${!bg && agg ? "bg-ink-800" : ""} ${!agg ? "bg-ink-900/40" : ""} ${
-                over ? "ring-1 ring-down" : ""
-              } ${k === todayKey ? "outline outline-1 outline-gold-400/60" : ""}`}
-            >
-              {dayNum}
-              {agg && agg.closedCount > 0 && (
-                <span className="text-[8px] font-bold leading-none opacity-90 sm:text-[11px]">
-                  {agg.pnl > 0 ? "+" : ""}
-                  {Math.round(agg.pnl)}
-                </span>
-              )}
-              {agg && agg.closedCount > 0 && (
-                <span className="hidden text-[9px] font-medium leading-tight text-white/70 sm:block">
-                  {agg.trades.length} trade{agg.trades.length === 1 ? "" : "s"}
-                </span>
-              )}
-              {agg && agg.trades.some((t) => t.status === "open") && (
-                <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-gold-400" />
-              )}
-            </button>
+            <div key={w} className="grid grid-cols-7 gap-1.5 sm:grid-cols-8 sm:gap-2">
+              {week.map((k, i) => {
+                if (!k) return <span key={`b${i}`} className="rounded-xl bg-ink-900/30" />;
+                const agg = byDay.get(k);
+                const dayNum = Number(k.slice(8));
+                const over = (agg?.trades.length ?? 0) > maxPerDay;
+                let bg: string | undefined;
+                if (agg && agg.closedCount > 0 && agg.pnl !== 0) {
+                  const alpha = 0.2 + 0.55 * (Math.abs(agg.pnl) / maxAbs);
+                  bg = agg.pnl > 0 ? `rgba(52,211,153,${alpha})` : `rgba(248,113,113,${alpha})`;
+                }
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    disabled={!agg}
+                    onClick={() => setSelected(k)}
+                    style={bg ? { backgroundColor: bg } : undefined}
+                    className={`relative flex min-h-14 flex-col items-center justify-center rounded-xl text-xs font-semibold transition sm:min-h-20 sm:text-sm lg:min-h-24 ${
+                      agg ? "text-white hover:scale-[1.03]" : "text-ink-600"
+                    } ${!bg && agg ? "bg-ink-800" : ""} ${!agg ? "bg-ink-900/40" : ""} ${
+                      over ? "ring-1 ring-down" : ""
+                    } ${k === todayKey ? "outline outline-1 outline-gold-400/60" : ""}`}
+                  >
+                    <span className="absolute left-1.5 top-1 text-[9px] font-semibold text-white/60 sm:text-[11px]">{dayNum}</span>
+                    {agg && agg.closedCount > 0 && (
+                      <span className="text-[10px] font-bold leading-none sm:text-base">
+                        {agg.pnl > 0 ? "+" : ""}
+                        {Math.round(agg.pnl)}
+                      </span>
+                    )}
+                    {agg && agg.closedCount > 0 && (
+                      <span className="hidden text-[9px] font-medium leading-tight text-white/70 sm:block">
+                        {agg.trades.length} trade{agg.trades.length === 1 ? "" : "s"}
+                      </span>
+                    )}
+                    {agg && agg.trades.some((t) => t.status === "open") && (
+                      <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-gold-400" />
+                    )}
+                  </button>
+                );
+              })}
+              <div className="hidden min-h-20 flex-col items-center justify-center rounded-xl border border-gold-500/20 bg-gold-500/5 sm:flex lg:min-h-24">
+                {wkClosed > 0 ? (
+                  <>
+                    <span className={`text-sm font-bold ${wkPnl > 0 ? "text-up" : wkPnl < 0 ? "text-down" : "text-ink-300"}`}>
+                      {fmtUsd(wkPnl)}
+                    </span>
+                    <span className="text-[9px] text-ink-400">{wkClosed} closed</span>
+                  </>
+                ) : (
+                  <span className="text-[10px] text-ink-500">—</span>
+                )}
+              </div>
+            </div>
           );
         })}
       </div>
@@ -920,6 +1004,8 @@ export function Stats() {
       <DisciplineTriangle trades={trades} maxPerDay={maxPerDay} />
 
       <NervousSystemCard trades={trades} />
+
+      <MistakesCostCard trades={trades} />
 
       <MonthlyProgress trades={trades} />
 

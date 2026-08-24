@@ -6,9 +6,13 @@ import { Sheet } from "./Sheet";
 import { useApp } from "../lib/store";
 import {
   BODY_SCALE,
+  CONFLUENCES,
   EMOTIONS,
+  EXEC_QUALITY,
   EXIT_FEELINGS,
+  MISTAKES,
   SETUPS,
+  SETUP_GRADES,
   TIMEFRAMES,
   TRADE_SESSIONS,
   TRIGGERS,
@@ -110,6 +114,10 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
   const [bodyDuring, setBodyDuring] = useState<number | null>(base?.body_during ?? null);
   const [exitFeeling, setExitFeeling] = useState<string | null>(base?.exit_feeling ?? null);
   const [feelingNote, setFeelingNote] = useState<string>(base?.feeling_note ?? "");
+  const [setupGrade, setSetupGrade] = useState<string | null>(base?.setup_grade ?? null);
+  const [execQuality, setExecQuality] = useState<string | null>(base?.execution_quality ?? null);
+  const [confluences, setConfluences] = useState<string[]>(base?.confluences ?? []);
+  const [mistakes, setMistakes] = useState<string[]>(base?.mistakes ?? []);
   const [autopilot, setAutopilot] = useState<number | null>(
     existing?.autopilot ?? prefill?.autopilot ?? null,
   );
@@ -122,6 +130,10 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
     setEmotions((prev) =>
       prev.includes(id) ? prev.filter((e) => e !== id) : [...prev, id],
     );
+  }
+
+  function toggleIn(list: string[], set: (v: string[]) => void, id: string) {
+    set(list.includes(id) ? list.filter((e) => e !== id) : [...list, id]);
   }
 
   function save() {
@@ -144,6 +156,10 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
     }
     if (isClosed && (exitFeeling === null || autopilot === null)) {
       setError("Close-out check: how you felt at exit + the Autopilot question are required.");
+      return;
+    }
+    if (isClosed && pnl !== null && pnl < 0 && mistakes.length === 0) {
+      setError('Tag the mistake — or "None — clean loss" if the setup was right and it just lost. This is how mistakes get price tags.');
       return;
     }
     const now = new Date().toISOString();
@@ -185,6 +201,10 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
       autopilot: isClosed ? autopilot : null,
       account_id: existing?.account_id ?? activeAccount?.id ?? null,
       feeling_note: feelingNote.trim() === "" ? null : feelingNote.trim(),
+      setup_grade: isClosed ? setupGrade : null,
+      execution_quality: isClosed ? execQuality : null,
+      confluences,
+      mistakes: isClosed ? mistakes : [],
     };
     void saveTrade(trade);
     onClose();
@@ -408,6 +428,61 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
             <div className="mt-3">
               <FieldLabel>Body while in the trade (if you watched)</FieldLabel>
               <ScaleRow value={bodyDuring} onChange={setBodyDuring} />
+            </div>
+          </div>
+          <div className="mt-3 rounded-2xl border border-white/10 bg-ink-800/50 p-3.5">
+            <p className="mb-3 text-[11px] font-bold uppercase tracking-wider text-ink-300">
+              Review — grade the trade, not the outcome
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <FieldLabel>Setup quality</FieldLabel>
+                <ChipRow>
+                  {SETUP_GRADES.map((g) => (
+                    <Chip key={g} active={setupGrade === g} onClick={() => setSetupGrade(g)}>
+                      {g}
+                    </Chip>
+                  ))}
+                </ChipRow>
+              </div>
+              <div>
+                <FieldLabel>Execution</FieldLabel>
+                <ChipRow>
+                  {EXEC_QUALITY.map((q) => (
+                    <Chip key={q.id} active={execQuality === q.id} onClick={() => setExecQuality(q.id)}>
+                      {q.label}
+                    </Chip>
+                  ))}
+                </ChipRow>
+              </div>
+            </div>
+            <div className="mt-3">
+              <FieldLabel>Confluences that were present</FieldLabel>
+              <ChipRow>
+                {CONFLUENCES.map((cf) => (
+                  <Chip
+                    key={cf.id}
+                    active={confluences.includes(cf.id)}
+                    onClick={() => toggleIn(confluences, setConfluences, cf.id)}
+                  >
+                    {cf.label}
+                  </Chip>
+                ))}
+              </ChipRow>
+            </div>
+            <div className="mt-3">
+              <FieldLabel>Mistakes (required on losses — honesty gets price tags)</FieldLabel>
+              <ChipRow>
+                {MISTAKES.map((m) => (
+                  <Chip
+                    key={m.id}
+                    active={mistakes.includes(m.id)}
+                    onClick={() => toggleIn(mistakes, setMistakes, m.id)}
+                  >
+                    {m.label}
+                  </Chip>
+                ))}
+              </ChipRow>
             </div>
           </div>
         </div>

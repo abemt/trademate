@@ -104,7 +104,7 @@ const TRADE_FIELDS = [
   "risk_pct", "pnl_usd", "r_multiple", "outcome", "status", "emotions", "screenshots",
   "followed_plan", "notes", "opened_at", "closed_at", "updated_at", "deleted",
   "body_before", "urge_before", "body_during", "exit_feeling", "autopilot",
-  "account_id", "feeling_note",
+  "account_id", "feeling_note", "setup_grade", "execution_quality", "confluences", "mistakes",
 ] as const;
 
 const UPSERT_TRADE_SQL = `
@@ -134,6 +134,11 @@ function cleanTrade(x: Record<string, unknown>): Record<string, unknown> | null 
       x.screenshots.filter((e) => typeof e === "string").slice(0, 6),
     );
   }
+  const strArr = (v: unknown, max: number) => {
+    if (typeof v === "string") return v.slice(0, 800);
+    if (Array.isArray(v)) return JSON.stringify(v.filter((e) => typeof e === "string").slice(0, max));
+    return "[]";
+  };
   const now = new Date().toISOString();
   return {
     id: x.id,
@@ -173,8 +178,46 @@ function cleanTrade(x: Record<string, unknown>): Record<string, unknown> | null 
     autopilot: x.autopilot === 1 || x.autopilot === 0 ? x.autopilot : null,
     account_id: str(x.account_id, 64),
     feeling_note: str(x.feeling_note, 2000),
+    setup_grade: str(x.setup_grade, 4),
+    execution_quality: str(x.execution_quality, 12),
+    confluences: strArr(x.confluences, 10),
+    mistakes: strArr(x.mistakes, 10),
   };
 }
+
+// ---------- pre-session routine ----------
+
+app.get("/routine", async (c) => {
+  const date = c.req.query("date") ?? "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return c.json({ routine: null });
+  try {
+    const row = await c.env.DB.prepare("SELECT * FROM routine_days WHERE date = ?")
+      .bind(date)
+      .first();
+    return c.json({ routine: row ?? null });
+  } catch {
+    return c.json({ routine: null });
+  }
+});
+
+app.post("/routine", async (c) => {
+  const b = await c.req
+    .json<{ date?: string; done?: unknown[]; note?: string }>()
+    .catch(() => null);
+  if (!b?.date || !/^\d{4}-\d{2}-\d{2}$/.test(b.date)) {
+    return c.json({ error: "date required" }, 400);
+  }
+  const done = JSON.stringify(
+    Array.isArray(b.done) ? b.done.filter((x) => typeof x === "string").slice(0, 12) : [],
+  );
+  const note = typeof b.note === "string" && b.note ? b.note.slice(0, 1000) : null;
+  await c.env.DB.prepare(
+    "INSERT INTO routine_days (date, done, note) VALUES (?,?,?) ON CONFLICT(date) DO UPDATE SET done = excluded.done, note = excluded.note",
+  )
+    .bind(b.date, done, note)
+    .run();
+  return c.json({ ok: true });
+});
 
 // ---------- accounts ----------
 

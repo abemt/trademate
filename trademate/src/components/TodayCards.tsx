@@ -495,6 +495,98 @@ export function CircuitBreakerCard() {
   );
 }
 
+// ---------- Pre-session routine ----------
+
+const ROUTINE_STEPS = [
+  { id: "briefing", label: "Read today's briefing" },
+  { id: "landmines", label: "Check calendar landmines" },
+  { id: "zones", label: "Confirm key zones" },
+  { id: "decide", label: "Decide: one graded trade — or SIT" },
+] as const;
+
+export function RoutineCard() {
+  const today = localDateKey(new Date().toISOString());
+  const [done, setDone] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api<{ routine: { done: string } | null }>(`/routine?date=${today}`)
+      .then((r) => {
+        if (cancelled) return;
+        try {
+          const parsed = JSON.parse(r.routine?.done ?? "[]");
+          setDone(Array.isArray(parsed) ? parsed.filter((x) => typeof x === "string") : []);
+        } catch {
+          setDone([]);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [today]);
+
+  function toggle(id: string) {
+    const next = done.includes(id) ? done.filter((d) => d !== id) : [...done, id];
+    setDone(next);
+    void api("/routine", {
+      method: "POST",
+      body: JSON.stringify({ date: today, done: next }),
+    }).catch(() => {});
+  }
+
+  const doneCount = ROUTINE_STEPS.filter((s) => done.includes(s.id)).length;
+  const complete = doneCount === ROUTINE_STEPS.length;
+
+  return (
+    <Card
+      title="Pre-session routine"
+      icon={<IconSpark />}
+      badge={complete ? "complete — cleared to engage" : `${doneCount}/${ROUTINE_STEPS.length}`}
+    >
+      <div className="mb-3 h-1.5 overflow-hidden rounded-full bg-ink-700">
+        <div
+          className={`h-full rounded-full transition-all ${complete ? "bg-up" : "bg-gold-500"}`}
+          style={{ width: `${Math.max(3, (doneCount / ROUTINE_STEPS.length) * 100)}%` }}
+        />
+      </div>
+      <ul className="space-y-2">
+        {ROUTINE_STEPS.map((s) => {
+          const checked = done.includes(s.id);
+          return (
+            <li key={s.id}>
+              <button
+                type="button"
+                onClick={() => toggle(s.id)}
+                className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left text-sm transition ${
+                  checked
+                    ? "border-up/30 bg-up/5 text-ink-300 line-through"
+                    : "border-white/10 bg-ink-800 text-white hover:border-gold-500/40"
+                }`}
+              >
+                <span
+                  className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold ${
+                    checked ? "border-up bg-up/20 text-up" : "border-ink-500 text-transparent"
+                  }`}
+                >
+                  ✓
+                </span>
+                {s.label}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {!complete && (
+        <p className="mt-2.5 text-[11px] leading-snug text-ink-400">
+          No orders before the routine is done — preparation is the first rule that gets broken on
+          tilt days.
+        </p>
+      )}
+    </Card>
+  );
+}
+
 // ---------- News watch ----------
 
 interface NewsEvent {
