@@ -26,6 +26,9 @@ interface AIEnv {
 // Pinned stable — the "latest" alias hot-swaps to new major versions with breaking
 // generationConfig changes (that's how thinkingBudget started returning HTTP 400).
 const GEMINI_MODEL = "gemini-3.6-flash";
+// Lite has its own (larger) free-tier quota bucket — text goes there first,
+// vision prefers flash; each falls back to the other on 429/outage.
+const GEMINI_LITE_MODEL = "gemini-3.6-flash-lite";
 // Groq decommissioned llama-3.3-70b + llama-4-scout in mid-2026 (HTTP 404).
 const GROQ_TEXT_MODEL = "openai/gpt-oss-120b";
 const GROQ_VISION_MODEL = "qwen/qwen3.6-27b";
@@ -34,11 +37,18 @@ const GITHUB_MODEL = "openai/gpt-4.1";
 
 export async function callAI(env: AIEnv, messages: AIMessage[], opts: AIOptions = {}): Promise<string> {
   const errors: string[] = [];
+  const hasImages = messages.some((m) => m.images && m.images.length > 0);
+  // Separate quota buckets: don't let cron text traffic starve vision grading.
+  const geminiModels = hasImages
+    ? [GEMINI_MODEL, GEMINI_LITE_MODEL]
+    : [GEMINI_LITE_MODEL, GEMINI_MODEL];
   if (env.GEMINI_API_KEY) {
-    try {
-      return await callGemini(env.GEMINI_API_KEY, messages, opts);
-    } catch (e) {
-      errors.push(`gemini: ${String(e).slice(0, 200)}`);
+    for (const model of geminiModels) {
+      try {
+        return await callGemini(env.GEMINI_API_KEY, messages, opts, model);
+      } catch (e) {
+        errors.push(`gemini/${model}: ${String(e).slice(0, 160)}`);
+      }
     }
   }
   if (env.GROQ_API_KEY) {
@@ -58,7 +68,12 @@ export async function callAI(env: AIEnv, messages: AIMessage[], opts: AIOptions 
   throw new Error(errors.length ? errors.join(" | ") : "No AI provider configured");
 }
 
-async function callGemini(key: string, messages: AIMessage[], opts: AIOptions): Promise<string> {
+async function callGemini(
+  key: string,
+  messages: AIMessage[],
+  opts: AIOptions,
+  model: string = GEMINI_MODEL,
+): Promise<string> {
   const system = messages.filter((m) => m.role === "system").map((m) => m.text).join("\n\n");
   const contents = messages
     .filter((m) => m.role !== "system")
@@ -73,7 +88,7 @@ async function callGemini(key: string, messages: AIMessage[], opts: AIOptions): 
     }));
 
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": key },
