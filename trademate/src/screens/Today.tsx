@@ -411,10 +411,15 @@ function RiskCalc() {
 function PropGuard() {
   const profile = useApp((s) => s.profile);
   const trades = useApp((s) => s.trades);
+  const accounts = useApp((s) => s.accounts);
+  const active = accounts.find((a) => a.active === 1 && a.archived === 0) ?? null;
+  const acctTrades = useMemo(
+    () => accountTrades(trades, active?.id ?? null),
+    [trades, active?.id],
+  );
   const maxPerDay = profile?.max_trades_per_day ?? 2;
-  const stats = useMemo(() => computeStats(trades, maxPerDay), [trades, maxPerDay]);
+  const stats = useMemo(() => computeStats(acctTrades, maxPerDay), [acctTrades, maxPerDay]);
   const phase = profile?.eval_phase ?? 1;
-  const acct = profile?.account_size ?? 10_000;
   const target =
     (phase === 2 ? profile?.prop_profit_target_p2_usd : profile?.prop_profit_target_usd) ??
     1000;
@@ -439,33 +444,34 @@ function PropGuard() {
       used: Math.max(0, stats.netUsd),
       limit: target,
       bar: "bg-up",
-      note: phase === 1 ? "then phase 2: 5%" : "last phase",
+      note: phase === 1 ? "then phase 2" : "last phase",
     },
   ];
 
   return (
-    <Card title="Prop Guard" icon={<IconGauge />} badge={`Alpha Capital · phase ${phase}`}>
+    <Card
+      title="Prop Guard"
+      icon={<IconGauge />}
+      badge={`${active?.label ?? "prop account"} · phase ${phase}`}
+    >
       <ul className="space-y-3">
         {rows.map((r) => {
-          const pct = Math.min(100, (r.used / r.limit) * 100);
+          const pct = Math.min(100, Math.max(0, (r.used / r.limit) * 100));
           return (
             <li key={r.label}>
               <div className="mb-1 flex items-baseline justify-between text-sm">
                 <span className="text-ink-300">
-                  {r.label}{" "}
-                  <span className="text-[10px] text-ink-400">
-                    · {r.note} · ${r.limit.toLocaleString()}
-                  </span>
+                  {r.label} <span className="text-[10px] text-ink-400">· {r.note}</span>
                 </span>
                 <span className="font-semibold text-white">
-                  {((r.used / acct) * 100).toFixed(1)}%
-                  <span className="text-ink-400"> / {Math.round((r.limit / acct) * 100)}%</span>
+                  ${Math.round(r.used).toLocaleString()}
+                  <span className="text-ink-400"> / ${r.limit.toLocaleString()} · {Math.round(pct)}%</span>
                 </span>
               </div>
               <div className="h-1.5 overflow-hidden rounded-full bg-ink-700">
                 <div
                   className={`h-full rounded-full ${r.bar} transition-all`}
-                  style={{ width: `${pct}%` }}
+                  style={{ width: `${Math.max(2, pct)}%` }}
                 />
               </div>
             </li>
@@ -473,8 +479,8 @@ function PropGuard() {
         })}
       </ul>
       <p className="mt-3 text-xs leading-relaxed text-ink-400">
-        Based on your journal. News rule: flat ±{profile?.news_buffer_min ?? 5} min around red
-        news — relaxed on your eval, but Mate warns you anyway.
+        Based on this account's journal. News rule: flat ±{profile?.news_buffer_min ?? 5} min
+        around red news — relaxed on your eval, but Mate warns you anyway.
       </p>
     </Card>
   );
