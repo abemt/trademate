@@ -143,7 +143,18 @@ function TradeRow({
               ))}
             </div>
           )}
+          {(t.plan_setup || t.plan_entry) && (
+            <div className="mt-2 rounded-xl border border-gold-500/20 bg-gold-500/5 px-3 py-2 text-xs text-ink-200">
+              {t.plan_setup && <p><span className="font-bold text-gold-400">Setup:</span> {t.plan_setup}</p>}
+              {t.plan_entry && <p className={t.plan_setup ? "mt-1" : ""}><span className="font-bold text-gold-400">Planned entry:</span> {t.plan_entry}</p>}
+            </div>
+          )}
           {t.notes && <p className="mt-2 text-sm leading-relaxed text-ink-200">{t.notes}</p>}
+          {t.lesson && (
+            <p className="mt-2 rounded-xl border border-white/10 bg-ink-800/60 px-3 py-2 text-xs italic leading-relaxed text-ink-100">
+              <span className="font-bold not-italic text-ink-300">Lesson:</span> {t.lesson}
+            </p>
+          )}
           <div className="mt-3 flex gap-2">
             {t.status === "open" && (
               <button

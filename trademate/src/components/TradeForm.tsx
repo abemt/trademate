@@ -123,6 +123,10 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
   const [planId, setPlanId] = useState<string | null>(base?.plan_id ?? null);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [plansOpen, setPlansOpen] = useState(false);
+  const [planSetup, setPlanSetup] = useState<string>(base?.plan_setup ?? "");
+  const [planEntry, setPlanEntry] = useState<string>(base?.plan_entry ?? "");
+  const [lesson, setLesson] = useState<string>(base?.lesson ?? "");
+  const [dayPlan, setDayPlan] = useState<{ bias: string | null; must_see: string | null } | null>(null);
   const [autopilot, setAutopilot] = useState<number | null>(
     existing?.autopilot ?? prefill?.autopilot ?? null,
   );
@@ -138,6 +142,11 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
   }
   useEffect(() => {
     loadPlans();
+    const today = new Date();
+    const key = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    api<{ plan: { bias: string | null; must_see: string | null } | null }>(`/dayplan?date=${key}`)
+      .then((r) => setDayPlan(r.plan))
+      .catch(() => {});
   }, []);
 
   function toggleEmotion(id: string) {
@@ -153,6 +162,10 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
   function save() {
     if (!direction) {
       setError("Long or short?");
+      return;
+    }
+    if (!existing && !closeMode && (planSetup.trim().length < 5 || planEntry.trim().length < 5)) {
+      setError("Write the plan first — setup + what you're waiting for. No written plan, no trade. That's the rule you gave yourself.");
       return;
     }
     if (bodyBefore === null || urgeBefore === null) {
@@ -174,6 +187,10 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
     }
     if (isClosed && pnl !== null && pnl < 0 && mistakes.length === 0) {
       setError('Tag the mistake — or "None — clean loss" if the setup was right and it just lost. This is how mistakes get price tags.');
+      return;
+    }
+    if (isClosed && pnl !== null && pnl < 0 && lesson.trim().length < 5) {
+      setError("One-sentence lesson before you close a loss — that's the tuition receipt.");
       return;
     }
     const now = new Date().toISOString();
@@ -220,6 +237,9 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
       confluences,
       mistakes: isClosed ? mistakes : [],
       plan_id: planId,
+      plan_setup: planSetup.trim() === "" ? null : planSetup.trim(),
+      plan_entry: planEntry.trim() === "" ? null : planEntry.trim(),
+      lesson: isClosed && lesson.trim() !== "" ? lesson.trim() : (existing?.lesson ?? null),
     };
     void saveTrade(trade);
     onClose();
@@ -252,6 +272,40 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
           >
             <IconTrendDown className="h-4.5 w-4.5" /> SHORT
           </button>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-gold-500/25 bg-gold-500/5 p-3.5">
+        <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-gold-400">
+          Written plan · required before entry
+        </p>
+        <p className="mb-3 text-[11px] leading-snug text-ink-400">
+          The contract with yourself. If price does something else — there is no trade.
+        </p>
+        {dayPlan && (dayPlan.bias || dayPlan.must_see) && (
+          <p className="mb-3 rounded-xl border border-white/10 bg-ink-800 px-3 py-2 text-[11px] text-ink-300">
+            Today's plan:{" "}
+            {dayPlan.bias && <span className="font-bold uppercase text-gold-300">{dayPlan.bias}</span>}
+            {dayPlan.must_see && <span> — must see: <span className="text-ink-100">{dayPlan.must_see}</span></span>}
+          </p>
+        )}
+        <FieldLabel>Setup — bias + why</FieldLabel>
+        <textarea
+          value={planSetup}
+          onChange={(e) => setPlanSetup(e.target.value)}
+          rows={2}
+          placeholder='e.g. "Bearish bias + rejection at H1 resistance zone"'
+          className="w-full resize-none rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60"
+        />
+        <div className="mt-3">
+          <FieldLabel>Planned entry — what exactly are you waiting for?</FieldLabel>
+          <textarea
+            value={planEntry}
+            onChange={(e) => setPlanEntry(e.target.value)}
+            rows={2}
+            placeholder='e.g. "Wait for clean double top on M15 — no double top, no entry"'
+            className="w-full resize-none rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60"
+          />
         </div>
       </div>
 
@@ -522,6 +576,16 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
                   </Chip>
                 ))}
               </ChipRow>
+            </div>
+            <div className="mt-3">
+              <FieldLabel>Lesson + action tomorrow (required on losses)</FieldLabel>
+              <textarea
+                value={lesson}
+                onChange={(e) => setLesson(e.target.value)}
+                rows={2}
+                placeholder='e.g. "Missing a setup is acceptable. Breaking entry criteria because of FOMO is not. Tomorrow: same criteria, no revenge trade."'
+                className="w-full resize-none rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60"
+              />
             </div>
           </div>
         </div>

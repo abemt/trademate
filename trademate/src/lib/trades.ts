@@ -45,6 +45,11 @@ export interface Trade {
   mistakes: string[];
   /** Playbook plan this trade was taken under. */
   plan_id: string | null;
+  /** Written pre-trade plan — the contract with yourself, required before logging. */
+  plan_setup: string | null;
+  plan_entry: string | null;
+  /** One honest takeaway, written at close (required on losses). */
+  lesson: string | null;
 }
 
 export interface Account {

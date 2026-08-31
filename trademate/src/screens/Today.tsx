@@ -14,6 +14,7 @@ import {
   BriefingCard,
   CheckinCard,
   CircuitBreakerCard,
+  DayPlanCard,
   DisciplineCard,
   NewsWatchCard,
   RoutineCard,
@@ -573,6 +574,7 @@ export function Today() {
         </div>
         <div className="space-y-4">
           <CircuitBreakerCard />
+          <DayPlanCard />
           <RoutineCard />
           <CheckinCard />
           <TradeTokens />

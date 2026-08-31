@@ -105,7 +105,7 @@ const TRADE_FIELDS = [
   "followed_plan", "notes", "opened_at", "closed_at", "updated_at", "deleted",
   "body_before", "urge_before", "body_during", "exit_feeling", "autopilot",
   "account_id", "feeling_note", "setup_grade", "execution_quality", "confluences", "mistakes",
-  "plan_id",
+  "plan_id", "plan_setup", "plan_entry", "lesson",
 ] as const;
 
 const UPSERT_TRADE_SQL = `
@@ -184,10 +184,44 @@ function cleanTrade(x: Record<string, unknown>): Record<string, unknown> | null 
     confluences: strArr(x.confluences, 10),
     mistakes: strArr(x.mistakes, 10),
     plan_id: str(x.plan_id, 64),
+    plan_setup: str(x.plan_setup, 1000),
+    plan_entry: str(x.plan_entry, 1000),
+    lesson: str(x.lesson, 2000),
   };
 }
 
 // ---------- pre-session routine ----------
+
+app.get("/dayplan", async (c) => {
+  const date = c.req.query("date") ?? "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return c.json({ plan: null });
+  try {
+    const row = await c.env.DB.prepare("SELECT * FROM day_plans WHERE date = ?")
+      .bind(date)
+      .first();
+    return c.json({ plan: row ?? null });
+  } catch {
+    return c.json({ plan: null });
+  }
+});
+
+app.post("/dayplan", async (c) => {
+  const b = await c.req
+    .json<{ date?: string; bias?: string; narrative?: string; must_see?: string; invalidation?: string; no_trade?: string; review?: string }>()
+    .catch(() => null);
+  if (!b?.date || !/^\d{4}-\d{2}-\d{2}$/.test(b.date)) return c.json({ error: "date required" }, 400);
+  const s = (v: unknown, max: number) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
+  const bias = ["bullish", "bearish", "neutral", "both"].includes(b.bias ?? "") ? b.bias : null;
+  await c.env.DB.prepare(
+    `INSERT INTO day_plans (date, bias, narrative, must_see, invalidation, no_trade, review, updated_at)
+     VALUES (?,?,?,?,?,?,?,datetime('now'))
+     ON CONFLICT(date) DO UPDATE SET bias=excluded.bias, narrative=excluded.narrative, must_see=excluded.must_see,
+       invalidation=excluded.invalidation, no_trade=excluded.no_trade, review=excluded.review, updated_at=excluded.updated_at`,
+  )
+    .bind(b.date, bias, s(b.narrative, 2000), s(b.must_see, 2000), s(b.invalidation, 1000), s(b.no_trade, 1000), s(b.review, 2000))
+    .run();
+  return c.json({ ok: true });
+});
 
 app.get("/routine", async (c) => {
   const date = c.req.query("date") ?? "";

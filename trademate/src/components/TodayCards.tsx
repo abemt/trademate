@@ -311,6 +311,185 @@ interface Checkin {
 const MOOD_LABELS = ["rough", "meh", "ok", "good", "sharp"];
 const SLEEP_LABELS = ["awful", "poor", "ok", "good", "great"];
 
+// ---------- Day plan (pre-session) ----------
+
+interface DayPlan {
+  date: string;
+  bias: string | null;
+  narrative: string | null;
+  must_see: string | null;
+  invalidation: string | null;
+  no_trade: string | null;
+  review: string | null;
+}
+
+const PLAN_BIASES = [
+  { id: "bullish", label: "Bullish" },
+  { id: "bearish", label: "Bearish" },
+  { id: "neutral", label: "Neutral" },
+  { id: "both", label: "Both ways" },
+];
+
+export function DayPlanCard() {
+  const [existing, setExisting] = useState<DayPlan | null | undefined>(undefined);
+  const [editing, setEditing] = useState(false);
+  const [bias, setBias] = useState<string | null>(null);
+  const [narrative, setNarrative] = useState("");
+  const [mustSee, setMustSee] = useState("");
+  const [invalidation, setInvalidation] = useState("");
+  const [noTrade, setNoTrade] = useState("");
+  const [review, setReview] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const today = localDateKey(new Date().toISOString());
+
+  useEffect(() => {
+    api<{ plan: DayPlan | null }>(`/dayplan?date=${today}`)
+      .then((r) => {
+        setExisting(r.plan);
+        if (r.plan) {
+          setBias(r.plan.bias);
+          setNarrative(r.plan.narrative ?? "");
+          setMustSee(r.plan.must_see ?? "");
+          setInvalidation(r.plan.invalidation ?? "");
+          setNoTrade(r.plan.no_trade ?? "");
+          setReview(r.plan.review ?? "");
+        }
+      })
+      .catch(() => setExisting(null));
+  }, [today]);
+
+  async function save() {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const plan: DayPlan = {
+        date: today,
+        bias,
+        narrative: narrative.trim() || null,
+        must_see: mustSee.trim() || null,
+        invalidation: invalidation.trim() || null,
+        no_trade: noTrade.trim() || null,
+        review: review.trim() || null,
+      };
+      await api("/dayplan", { method: "POST", body: JSON.stringify(plan) });
+      setExisting(plan);
+      setEditing(false);
+    } catch {
+      // stay on form
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (existing === undefined) return null;
+
+  if (existing && !editing) {
+    return (
+      <Card title="Day plan" icon={<IconSpark />} badge="written ✓">
+        {existing.bias && (
+          <span
+            className={`mb-2 inline-block rounded-full border px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide ${
+              BIAS_STYLE[existing.bias] ?? "border-white/15 bg-ink-800 text-ink-200"
+            }`}
+          >
+            {PLAN_BIASES.find((b) => b.id === existing.bias)?.label ?? existing.bias}
+          </span>
+        )}
+        <div className="space-y-1.5 text-sm text-ink-200">
+          {existing.narrative && <p><span className="font-semibold text-ink-400">I expect:</span> {existing.narrative}</p>}
+          {existing.must_see && <p><span className="font-semibold text-gold-300">Must see before entry:</span> {existing.must_see}</p>}
+          {existing.invalidation && <p><span className="font-semibold text-ink-400">I'm wrong if:</span> {existing.invalidation}</p>}
+          {existing.no_trade && <p><span className="font-semibold text-down">I sit out if:</span> {existing.no_trade}</p>}
+          {existing.review && <p className="border-t border-white/5 pt-1.5 italic text-ink-300">Review: {existing.review}</p>}
+        </div>
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="mt-2.5 text-[11px] font-bold text-gold-500 hover:text-gold-400"
+        >
+          Edit / add end-of-day review ›
+        </button>
+      </Card>
+    );
+  }
+
+  return (
+    <Card title="Day plan — before the session" icon={<IconSpark />}>
+      <FieldLabel>Bias</FieldLabel>
+      <ChipRow>
+        {PLAN_BIASES.map((b) => (
+          <Chip key={b.id} active={bias === b.id} onClick={() => setBias(b.id)}>
+            {b.label}
+          </Chip>
+        ))}
+      </ChipRow>
+      <div className="mt-3">
+        <FieldLabel>What I think will happen</FieldLabel>
+        <textarea
+          value={narrative}
+          onChange={(e) => setNarrative(e.target.value)}
+          rows={2}
+          placeholder='e.g. "Pullback into the H1 supply zone, then continuation down toward 2 380"'
+          className="w-full resize-none rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60"
+        />
+      </div>
+      <div className="mt-3">
+        <FieldLabel>What I need to see before entering</FieldLabel>
+        <textarea
+          value={mustSee}
+          onChange={(e) => setMustSee(e.target.value)}
+          rows={2}
+          placeholder='e.g. "Clean double top at the zone on M15 — nothing else counts"'
+          className="w-full resize-none rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60"
+        />
+      </div>
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div>
+          <FieldLabel>I'm wrong if…</FieldLabel>
+          <input
+            type="text"
+            value={invalidation}
+            onChange={(e) => setInvalidation(e.target.value)}
+            placeholder='"H1 closes above 2 412"'
+            className="w-full rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60"
+          />
+        </div>
+        <div>
+          <FieldLabel>I sit out if…</FieldLabel>
+          <input
+            type="text"
+            value={noTrade}
+            onChange={(e) => setNoTrade(e.target.value)}
+            placeholder='"Chop before CPI / no clean trigger"'
+            className="w-full rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60"
+          />
+        </div>
+      </div>
+      {existing && (
+        <div className="mt-3">
+          <FieldLabel>End of day — how did it actually play out?</FieldLabel>
+          <textarea
+            value={review}
+            onChange={(e) => setReview(e.target.value)}
+            rows={2}
+            placeholder='e.g. "Double top never formed → price dropped without me. Stayed out = correct."'
+            className="w-full resize-none rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60"
+          />
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={() => void save()}
+        disabled={saving || (!bias && !narrative.trim() && !mustSee.trim())}
+        className="mt-3 w-full rounded-xl bg-gold-500 py-2.5 font-semibold text-ink-950 transition hover:bg-gold-400 disabled:opacity-40"
+      >
+        {saving ? "Saving…" : "Lock in the plan"}
+      </button>
+    </Card>
+  );
+}
+
 export function CheckinCard() {
   const [existing, setExisting] = useState<Checkin | null | undefined>(undefined);
   const [mood, setMood] = useState<number | null>(null);
