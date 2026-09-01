@@ -181,9 +181,11 @@ export async function traderContext(env: Env): Promise<string> {
     // columns may not exist yet
   }
 
-  const todayCount = trades.filter(
-    (t) => localDate(tz, new Date(t.opened_at)) === today,
-  ).length;
+  const todayTrades = trades.filter((t) => localDate(tz, new Date(t.opened_at)) === today);
+  const todayCount = todayTrades.length;
+  const todayClosed = todayTrades.filter((t) => t.status === "closed" && t.pnl_usd !== null);
+  const todayNet = todayClosed.reduce((s, t) => s + (t.pnl_usd ?? 0), 0);
+  const todayBreaks = todayTrades.filter((t) => t.followed_plan === 0).length;
   const closed = trades.filter((t) => t.status === "closed" && t.pnl_usd !== null);
   const recentPnl = closed.reduce((s, t) => s + (t.pnl_usd ?? 0), 0);
 
@@ -194,6 +196,25 @@ export async function traderContext(env: Env): Promise<string> {
       .first<{ mood: number | null; sleep: number | null; plan: string | null }>();
     if (ci) {
       checkinLine = `Today's check-in: mood ${ci.mood ?? "?"}/5, sleep ${ci.sleep ?? "?"}/5${ci.plan ? `, plan: "${ci.plan.slice(0, 140)}"` : ""}`;
+    }
+  } catch {
+    // table may not exist yet
+  }
+
+  let dayPlanLine = "No written day plan today.";
+  try {
+    const dp = await env.DB.prepare("SELECT * FROM day_plans WHERE date = ?")
+      .bind(today)
+      .first<{ bias: string | null; narrative: string | null; must_see: string | null; invalidation: string | null; no_trade: string | null; review: string | null }>();
+    if (dp) {
+      const p: string[] = [];
+      if (dp.bias) p.push(`bias ${dp.bias.toUpperCase()}`);
+      if (dp.narrative) p.push(`expects: "${dp.narrative.slice(0, 160)}"`);
+      if (dp.must_see) p.push(`must see before entry: "${dp.must_see.slice(0, 160)}"`);
+      if (dp.invalidation) p.push(`wrong if: "${dp.invalidation.slice(0, 100)}"`);
+      if (dp.no_trade) p.push(`sits out if: "${dp.no_trade.slice(0, 100)}"`);
+      if (dp.review) p.push(`his end-of-day review: "${dp.review.slice(0, 160)}"`);
+      if (p.length) dayPlanLine = "Today's written day plan — " + p.join(" · ");
     }
   } catch {
     // table may not exist yet
@@ -225,19 +246,23 @@ Known weaknesses: ${profile.weaknesses}
 Market regime note: ${profile.market_regime_note ?? "n/a"}
 His marked zones: ${zonesLine}
 ${checkinLine}
-Today: ${todayCount} of ${profile.max_trades_per_day} trades used.
 Nervous system: ${nervousLine}
 Recent trades P&L (last ${closed.length} closed): ${recentPnl >= 0 ? "+" : ""}$${Math.round(recentPnl)}
-Recent trades:
+Recent trades (HISTORY — includes previous days, check each date):
 ${tradeLines(trades)}
 
-HIS BINDING CONTRACT (agreed Aug 2026 — hold him to it, quote it back when he drifts):
-1. The small account's job is REPS, not compounding. Success = rule-compliant trades; balance is irrelevant.
-2. Every trade is graded BEFORE entry (no grade, no trade), placed as a bracket order (entry+SL+TP together), then app closed and a 30-minute walk. No watching 1-minute candles — zone alerts and 15/30-minute glances only.
-3. One trade per day maximum right now. One loss = done for the day.
+=== TODAY (${today}) — THE ONLY TRADES THAT COUNT AS TODAY ===
+${dayPlanLine}
+Trades today: ${todayCount} of ${profile.max_trades_per_day} allowed · Net P&L today: ${todayNet >= 0 ? "+" : ""}$${Math.round(todayNet)} · Plan-breaks today: ${todayBreaks}
+${tradeLines(todayTrades)}
+Judge TODAY strictly from this section. NEVER attribute yesterday's trades to today, and NEVER invent trades that are not listed here. If today shows 0 plan-breaks and he stayed within his limits, today WAS a rule-compliant day — say so and celebrate the discipline.
+
+HIS CURRENT CONTRACT (LIVE — the numbers come from his profile and OVERRIDE any older version you remember):
+1. The account's job is REPS, not compounding. Success = rule-compliant trades; balance is irrelevant.
+2. Every trade is graded BEFORE entry (no grade, no trade) and placed as a bracket order (entry+SL+TP together). No staring at 1-minute candles — zone alerts and 15/30-minute glances only.
+3. MAX ${profile.max_trades_per_day} trade(s) per day — this number is his CURRENT rule.${Number(profile.max_trades_per_day) === 1 ? " One loss = done for the day." : ""}
 4. SL moves to break-even ONLY after a new structure point confirms beyond entry on a 15-MINUTE CLOSE — never from fear, never on a wick.
-5. Two rule violations total, or a blown account → demo only, until (a) stable income lands AND (b) 30 consecutive clean demo trades.
-6. Red-flag sentences — call them out the moment you hear them: "one last $10", "one more try", "I'll win it back", or wanting to deposit right after a blowup. That is Autopilot talking, not him.`;
+5. Red-flag sentences — call them out the moment you hear them: "one last $10", "one more try", "I'll win it back", or wanting to deposit right after a blowup. That is Autopilot talking, not him.`;
 }
 
 export async function askMate(
