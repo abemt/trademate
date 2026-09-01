@@ -415,14 +415,26 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
 
       <div>
         <FieldLabel>Risk</FieldLabel>
-        <div className="flex items-center gap-2">
-          {[0.5, 1].map((r) => (
+        <div className="flex flex-wrap items-center gap-2">
+          {[0.25, 0.5, 1, 2].map((r) => (
             <Chip key={r} active={riskPct === r} onClick={() => setRiskPct(r)}>
               {r}%
             </Chip>
           ))}
+          <span className="text-xs text-ink-400">$</span>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={riskUsd > 0 ? String(riskUsd) : ""}
+            onChange={(e) => {
+              const usd = Number.parseFloat(e.target.value);
+              if (Number.isFinite(usd) && usd >= 0 && accountSize > 0)
+                setRiskPct(Math.round((usd / accountSize) * 10000) / 100);
+            }}
+            className="w-20 rounded-lg border border-white/10 bg-ink-800 px-2 py-1.5 text-sm font-semibold text-white outline-none focus:border-gold-500/60"
+          />
           <span className="ml-auto text-xs text-ink-400">
-            <span className="font-semibold text-gold-300">{lots.toFixed(2)} lots</span> · $
+            <span className="font-semibold text-gold-300">{lots.toFixed(2)} lots</span> · {riskPct}% · $
             {riskUsd.toFixed(0)} at risk
           </span>
         </div>

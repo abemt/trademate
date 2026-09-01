@@ -165,6 +165,8 @@ export function SettingsSheet({ open, onClose }: { open: boolean; onClose: () =>
   const [maxTrades, setMaxTrades] = useState(2);
   const [phase, setPhase] = useState(1);
   const [regime, setRegime] = useState("choppy");
+  const [riskMin, setRiskMin] = useState("0.5");
+  const [riskMax, setRiskMax] = useState("1");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
@@ -178,6 +180,8 @@ export function SettingsSheet({ open, onClose }: { open: boolean; onClose: () =>
     setMaxTrades(profile.max_trades_per_day);
     setPhase(profile.eval_phase);
     setRegime(profile.market_regime);
+    setRiskMin(String(profile.risk_pct_min));
+    setRiskMax(String(profile.risk_pct_max));
     setSaved(false);
     setError("");
     setTestSent(false);
@@ -195,6 +199,8 @@ export function SettingsSheet({ open, onClose }: { open: boolean; onClose: () =>
           max_trades_per_day: maxTrades,
           eval_phase: phase,
           market_regime: regime,
+          risk_pct_min: Number.parseFloat(riskMin) || undefined,
+          risk_pct_max: Number.parseFloat(riskMax) || undefined,
         }),
       });
       await loadProfile();
@@ -256,6 +262,28 @@ export function SettingsSheet({ open, onClose }: { open: boolean; onClose: () =>
                 </Chip>
               ))}
             </ChipRow>
+          </div>
+        </div>
+
+        <div>
+          <FieldLabel>Risk per trade — min to max % (Mate enforces this range)</FieldLabel>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              inputMode="decimal"
+              value={riskMin}
+              onChange={(e) => setRiskMin(e.target.value)}
+              className="w-24 rounded-xl border border-white/10 bg-ink-800 px-3 py-2 text-sm text-white outline-none focus:border-gold-500/60"
+            />
+            <span className="text-ink-400">to</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={riskMax}
+              onChange={(e) => setRiskMax(e.target.value)}
+              className="w-24 rounded-xl border border-white/10 bg-ink-800 px-3 py-2 text-sm text-white outline-none focus:border-gold-500/60"
+            />
+            <span className="text-xs text-ink-400">% of account</span>
           </div>
         </div>
 

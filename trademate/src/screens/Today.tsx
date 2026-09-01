@@ -178,7 +178,7 @@ function TradeTokens() {
   );
 }
 
-const RISK_CHOICES = [0.5, 1.0];
+const RISK_CHOICES = [0.25, 0.5, 1.0, 2.0];
 
 const RANGES = [
   { id: "1d", label: "Today", days: 1 },
@@ -349,12 +349,12 @@ function RiskCalc() {
 
   return (
     <Card title="Risk Guard" icon={<IconShield />} badge={active?.label ?? profile?.account_label ?? "account"}>
-      <div className="mb-3 flex gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         {RISK_CHOICES.map((r) => (
           <button
             key={r}
             onClick={() => setRiskPct(r)}
-            className={`rounded-lg px-3.5 py-1.5 text-sm font-semibold transition ${
+            className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
               riskPct === r
                 ? "bg-gold-500 text-ink-950"
                 : "border border-white/10 bg-ink-800 text-ink-300 hover:text-white"
@@ -363,8 +363,22 @@ function RiskCalc() {
             {r}%
           </button>
         ))}
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-ink-400">$</span>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={riskUsd > 0 ? String(Math.round(riskUsd * 100) / 100) : ""}
+            onChange={(e) => {
+              const usd = Number.parseFloat(e.target.value);
+              if (Number.isFinite(usd) && usd >= 0 && accountSize > 0)
+                setRiskPct(Math.round((usd / accountSize) * 10000) / 100);
+            }}
+            className="w-20 rounded-lg border border-white/10 bg-ink-800 px-2 py-1.5 text-sm font-semibold text-white outline-none focus:border-gold-500/60"
+          />
+        </div>
         <span className="ml-auto self-center text-xs text-ink-400">
-          ${accountSize.toLocaleString(undefined, { maximumFractionDigits: 0 })} balance
+          {riskPct}% · ${accountSize.toLocaleString(undefined, { maximumFractionDigits: 0 })} balance
         </span>
       </div>
 

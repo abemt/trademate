@@ -404,10 +404,29 @@ export async function weeklyReport(env: Env, refresh = false): Promise<Record<st
     // no checkins table
   }
 
+  let dayPlans = "";
+  try {
+    const r = await env.DB.prepare(
+      "SELECT date, bias, narrative, must_see, no_trade, review FROM day_plans WHERE date >= ? ORDER BY date",
+    )
+      .bind(week)
+      .all();
+    dayPlans = (r.results as { date: string; bias: string | null; narrative: string | null; must_see: string | null; no_trade: string | null; review: string | null }[])
+      .map((p) => {
+        const bits = [p.bias ? `bias ${p.bias}` : "", p.narrative ? `expected:"${p.narrative.slice(0, 100)}"` : "", p.must_see ? `must-see:"${p.must_see.slice(0, 100)}"` : "", p.no_trade ? `sit-out-if:"${p.no_trade.slice(0, 60)}"` : "", p.review ? `his-review:"${p.review.slice(0, 120)}"` : ""].filter(Boolean);
+        return `- ${p.date}: ${bits.join(" · ")}`;
+      })
+      .join("\n");
+  } catch {
+    // no day_plans table
+  }
+
   const prompt = [
     `Write my weekly coaching review (week starting ${week}).`,
     `This week's trades:\n${tradeLines(weekTrades)}`,
+    dayPlans ? `My written day plans this week (compare planned vs what I actually did — plan adherence is the core of the review):\n${dayPlans}` : "No written day plans this week — mention that writing them is part of the routine.",
     checkins ? `Check-ins:\n${checkins}` : "No check-ins this week.",
+    "Weigh plan adherence over P&L: trades matching the written plan (his-plan / waited-for) are wins even when red; trades contradicting the plan are failures even when green. Use my CURRENT rules from the context — not any older limits.",
     weekTrades.length === 0
       ? "I logged no trades this week — address that directly (was it discipline or avoidance?)."
       : "",

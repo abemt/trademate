@@ -72,12 +72,16 @@ interface TradeRow {
   urge_before: number | null;
   autopilot: number | null;
   feeling_note: string | null;
+  plan_setup: string | null;
+  plan_entry: string | null;
+  lesson: string | null;
+  mistakes: string | null;
 }
 
 export async function recentTrades(env: Env, limit = 15): Promise<TradeRow[]> {
   try {
     const r = await env.DB.prepare(
-      "SELECT opened_at, direction, setup_type, session, status, pnl_usd, r_multiple, emotions, followed_plan, notes, body_before, urge_before, autopilot, feeling_note FROM trades WHERE deleted = 0 ORDER BY opened_at DESC LIMIT ?",
+      "SELECT opened_at, direction, setup_type, session, status, pnl_usd, r_multiple, emotions, followed_plan, notes, body_before, urge_before, autopilot, feeling_note, plan_setup, plan_entry, lesson, mistakes FROM trades WHERE deleted = 0 ORDER BY opened_at DESC LIMIT ?",
     )
       .bind(limit)
       .all();
@@ -101,9 +105,13 @@ export function tradeLines(trades: TradeRow[]): string {
     if (t.body_before != null || t.urge_before != null)
       bits.push(`body:${t.body_before ?? "?"}/5 urge:${t.urge_before ?? "?"}/5`);
     if (t.autopilot === 1) bits.push("AUTOPILOT-TOOK-OVER");
+    if (t.plan_setup) bits.push(`his-plan:"${t.plan_setup.slice(0, 70)}"`);
+    if (t.plan_entry) bits.push(`waited-for:"${t.plan_entry.slice(0, 70)}"`);
     if (t.feeling_note) bits.push(`felt:"${t.feeling_note.slice(0, 80)}"`);
     if (t.emotions && t.emotions !== "[]") bits.push(`tags:${t.emotions}`);
+    if (t.mistakes && t.mistakes !== "[]") bits.push(`mistakes:${t.mistakes}`);
     if (t.followed_plan === 0) bits.push("BROKE-PLAN");
+    if (t.lesson) bits.push(`his-lesson:"${t.lesson.slice(0, 90)}"`);
     if (t.notes) bits.push(`note:"${t.notes.slice(0, 90)}"`);
     return "- " + bits.filter(Boolean).join(" | ");
   });

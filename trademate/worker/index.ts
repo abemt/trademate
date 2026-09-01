@@ -913,12 +913,12 @@ app.put("/profile", async (c) => {
     sets.push("eval_phase = ?");
     vals.push(Math.round(phase));
   }
-  const rMin = num(b.risk_pct_min, 0.1, 5);
+  const rMin = num(b.risk_pct_min, 0.01, 100);
   if (rMin !== undefined) {
     sets.push("risk_pct_min = ?");
     vals.push(rMin);
   }
-  const rMax = num(b.risk_pct_max, 0.1, 10);
+  const rMax = num(b.risk_pct_max, 0.01, 100);
   if (rMax !== undefined) {
     sets.push("risk_pct_max = ?");
     vals.push(rMax);
