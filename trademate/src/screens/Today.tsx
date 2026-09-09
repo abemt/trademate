@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Card } from "../components/Card";
+import { EntryGate } from "../components/EntryGate";
+import { tradingDate } from "../../shared/entryGate";
 import {
   IconClock,
   IconCoin,
@@ -27,7 +29,6 @@ import {
   currentBalance,
   fmtR,
   fmtUsd,
-  localDateKey,
   optionLabel,
 } from "../lib/trades";
 import { EquityCurve } from "../components/EquityCurve";
@@ -123,16 +124,21 @@ function TradeTokens() {
   const trades = useApp((s) => s.trades);
   const setTab = useApp((s) => s.setTab);
   const setLogFormOpen = useApp((s) => s.setLogFormOpen);
-  const max = profile?.max_trades_per_day ?? 2;
-  const today = localDateKey(new Date().toISOString());
-  const used = trades.filter((t) => localDateKey(t.opened_at) === today).length;
+  const accounts = useApp((s) => s.accounts);
+  const gate = useApp((s) => s.entryGate);
+  const active = accounts.find((account) => account.active === 1 && account.archived === 0);
+  const state = gate?.account_id === active?.id ? gate : null;
+  const timezone = profile?.timezone ?? "Africa/Addis_Ababa";
+  const max = state?.max_trades ?? profile?.max_trades_per_day ?? 2;
+  const today = tradingDate(timezone);
+  const used = state?.date === today ? state.trade_count : accountTrades(trades, active?.id ?? null).filter((trade) => tradingDate(timezone, Date.parse(trade.opened_at)) === today).length;
   const over = used > max;
   const left = Math.max(0, max - used);
 
   return (
     <Card title="Trade tokens" icon={<IconCoin />} badge={`your rule: max ${max}/day`}>
       <div className="flex items-center gap-4">
-        <div className="flex gap-3">
+        <div className="flex max-w-48 flex-wrap gap-3">
           {Array.from({ length: max }, (_, i) => {
             const isUsed = i < used;
             return (
@@ -160,8 +166,8 @@ function TradeTokens() {
           {over
             ? `${used} of ${max}. Past your rule — log honestly, close the charts. Patterns beat shame.`
             : left === 0
-              ? "Both used. You're done for today — win or lose, that was YOUR rule."
-              : `${left} trade${left === 1 ? "" : "s"} left today. Tokens fill from your journal.`}
+              ? "Daily limit reached. No extra entry."
+              : state?.sit_out ? "Finished for today. Unused entries are not a target." : `${left} possible entr${left === 1 ? "y" : "ies"} remaining. None are owed to the market.`}
         </p>
       </div>
       <motion.button
@@ -172,7 +178,7 @@ function TradeTokens() {
         }}
         className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-gold-500 py-3 font-semibold text-ink-950 transition hover:bg-gold-400"
       >
-        <IconPlus className="h-4.5 w-4.5" /> Log a trade
+        <IconPlus className="h-4.5 w-4.5" /> Entry checkpoint
       </motion.button>
     </Card>
   );
@@ -574,9 +580,12 @@ export function Today() {
   const accounts = useApp((s) => s.accounts);
   const active = accounts.find((a) => a.active === 1 && a.archived === 0) ?? null;
   const isProp = active ? active.type === "prop_eval" || active.type === "prop_funded" : false;
+  const setTab = useApp((state) => state.setTab);
+  const setLogFormOpen = useApp((state) => state.setLogFormOpen);
   return (
     <div className="space-y-4">
       <Greeting now={now} />
+      <EntryGate key={active?.id ?? "no-account"} onReady={() => { setTab("journal"); setLogFormOpen(true); }} />
       <DashboardStats />
       <div className="space-y-4 lg:grid lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start lg:gap-4 lg:space-y-0">
         <div className="space-y-4">

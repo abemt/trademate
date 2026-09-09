@@ -11,6 +11,7 @@ import {
 } from "./context";
 import { generateBriefing, scanNews, weeklyReport } from "./market";
 import { pushAll } from "./push";
+import { entryGateRoutes, guardTradeWrites } from "./entryGate";
 
 const COOKIE = "tm_session";
 const SESSION_DAYS = 30;
@@ -86,6 +87,8 @@ app.use("*", async (c, next) => {
 
 // ---------- protected routes ----------
 
+app.route("/", entryGateRoutes);
+
 app.get("/profile", async (c) => {
   try {
     const row = await c.env.DB.prepare("SELECT * FROM profile WHERE id = 1").first();
@@ -106,6 +109,7 @@ const TRADE_FIELDS = [
   "body_before", "urge_before", "body_during", "exit_feeling", "autopilot",
   "account_id", "feeling_note", "setup_grade", "execution_quality", "confluences", "mistakes",
   "plan_id", "plan_setup", "plan_entry", "lesson",
+  "entry_plan_id", "entry_mode", "unplanned_reason",
 ] as const;
 
 const UPSERT_TRADE_SQL = `
@@ -116,6 +120,7 @@ ${TRADE_FIELDS.filter((f) => f !== "id").map((f) => `${f}=excluded.${f}`).join("
 WHERE excluded.updated_at >= trades.updated_at`;
 
 function cleanTrade(x: Record<string, unknown>): Record<string, unknown> | null {
+  if (!x || typeof x !== "object") return null;
   if (typeof x.id !== "string" || x.id.length === 0 || x.id.length > 64) return null;
   if (x.direction !== "long" && x.direction !== "short") return null;
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
@@ -187,6 +192,9 @@ function cleanTrade(x: Record<string, unknown>): Record<string, unknown> | null 
     plan_setup: str(x.plan_setup, 1000),
     plan_entry: str(x.plan_entry, 1000),
     lesson: str(x.lesson, 2000),
+    entry_plan_id: str(x.entry_plan_id, 64),
+    entry_mode: x.entry_mode === "unplanned" ? "unplanned" : "planned",
+    unplanned_reason: str(x.unplanned_reason, 2000),
   };
 }
 
@@ -472,8 +480,13 @@ app.put("/trades", async (c) => {
     .filter((r): r is Record<string, unknown> => r !== null);
   if (rows.length === 0) return c.json({ error: "No valid trades" }, 400);
   const stmt = c.env.DB.prepare(UPSERT_TRADE_SQL);
-  await c.env.DB.batch(rows.map((r) => stmt.bind(...TRADE_FIELDS.map((f) => r[f]))));
-  return c.json({ ok: true, count: rows.length });
+  try {
+    const guarded = await guardTradeWrites(c.env, rows);
+    await c.env.DB.batch([...guarded.claims, ...guarded.trades.map((row) => stmt.bind(...TRADE_FIELDS.map((field) => row[field])))]);
+    return c.json({ ok: true, count: guarded.trades.length, trades: guarded.trades });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Entry gate unavailable. No trade was saved." }, 409);
+  }
 });
 
 // ---------- screenshots (stored as D1 blobs) ----------

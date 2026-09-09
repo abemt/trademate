@@ -4,7 +4,8 @@ import { Chip, ChipRow, FieldLabel } from "./Chip";
 import { IconGauge, IconNews, IconSpark } from "./Icons";
 import { api } from "../lib/api";
 import { useApp } from "../lib/store";
-import { localDateKey, type Trade } from "../lib/trades";
+import { accountTrades, localDateKey, type Trade } from "../lib/trades";
+import { tradingDate } from "../../shared/entryGate";
 
 function useNowTick(ms = 30_000): Date {
   const [now, setNow] = useState(() => new Date());
@@ -912,7 +913,13 @@ interface SetupRow {
 }
 
 export function DisciplineCard() {
-  const trades = useApp((s) => s.trades);
+  const allTrades = useApp((s) => s.trades);
+  const accounts = useApp((state) => state.accounts);
+  const accountId = accounts.find((account) => account.active === 1 && account.archived === 0)?.id;
+  const trades = useMemo(() => accountTrades(allTrades, accountId ?? null), [allTrades, accountId]);
+  const storedGate = useApp((state) => state.entryGate);
+  const gate = storedGate?.account_id === accountId ? storedGate : null;
+  const timezone = useApp((state) => state.profile?.timezone) ?? "Africa/Addis_Ababa";
   const maxPerDay = useApp((s) => s.profile?.max_trades_per_day) ?? 2;
   const [setups, setSetups] = useState<SetupRow[]>([]);
   const [checkins, setCheckins] = useState<Checkin[]>([]);
@@ -927,13 +934,13 @@ export function DisciplineCard() {
   }, [trades.length]);
 
   const { xp, streak, todayXp } = useMemo(() => {
-    const today = localDateKey(new Date().toISOString());
+    const today = tradingDate(timezone);
     const dayXp = new Map<string, number>();
     const add = (day: string, v: number) => dayXp.set(day, (dayXp.get(day) ?? 0) + v);
 
     const byDay = new Map<string, Trade[]>();
     for (const t of trades) {
-      const k = localDateKey(t.opened_at);
+      const k = tradingDate(timezone, Date.parse(t.opened_at));
       add(k, 10); // honest journaling
       if (t.followed_plan === 1) add(k, 20);
       if (t.followed_plan === 0) add(k, -10);
@@ -946,26 +953,28 @@ export function DisciplineCard() {
       if (s.decision === "skipped") add(localDateKey(s.created_at.replace(" ", "T") + "Z"), 15);
     }
     for (const c of checkins) add(c.date, 10);
+    const noTradeDays = new Set((gate?.sit_out_days ?? []).filter((day) => day.entries === 0 && !byDay.has(day.date)).map((day) => day.date));
+    for (const day of noTradeDays) add(day, 20);
 
     let total = 0;
     for (const v of dayXp.values()) total += Math.max(0, v);
 
     // streak: consecutive active days (trade or check-in) without breaking the trade cap
     let streakCount = 0;
-    const d = new Date();
+    const d = new Date(`${today}T12:00:00Z`);
     for (let i = 0; i < 60; i++) {
-      const key = localDateKey(d.toISOString());
-      const dow = d.getDay();
-      const active = byDay.has(key) || checkins.some((c) => c.date === key);
-      const violated = (byDay.get(key)?.length ?? 0) > maxPerDay;
+      const key = d.toISOString().slice(0, 10);
+      const dow = d.getUTCDay();
+      const active = byDay.has(key) || checkins.some((c) => c.date === key) || noTradeDays.has(key);
+      const violated = (byDay.get(key)?.length ?? 0) > maxPerDay || (byDay.get(key) ?? []).some((trade) => trade.followed_plan === 0 || trade.entry_mode === "unplanned");
       if (active && !violated) streakCount++;
       else if (dow !== 0 && dow !== 6 && !(i === 0)) break;
       else if (violated) break;
-      d.setDate(d.getDate() - 1);
+      d.setUTCDate(d.getUTCDate() - 1);
     }
 
     return { xp: total, streak: streakCount, todayXp: Math.max(0, dayXp.get(today) ?? 0) };
-  }, [trades, setups, checkins, maxPerDay]);
+  }, [trades, setups, checkins, maxPerDay, gate, timezone]);
 
   const level = Math.floor(xp / 100) + 1;
 
@@ -990,7 +999,7 @@ export function DisciplineCard() {
       </div>
       <p className="mt-2.5 text-xs leading-relaxed text-ink-400">
         XP comes from process only: journaling (+10), following your plan (+20), skipping weak
-        setups (+15), checking in (+10). Never from profits.
+        setups (+15), checking in (+10), a committed zero-trade day (+20). Never from profits.
       </p>
     </Card>
   );

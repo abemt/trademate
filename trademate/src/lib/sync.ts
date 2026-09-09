@@ -50,6 +50,17 @@ function readJson<T>(key: string, fallback: T): T {
   }
 }
 
+export async function createTrade(trade: Trade): Promise<Trade> {
+  const response = await api<{ trades: TradeRow[] }>("/trades", {
+    method: "PUT", body: JSON.stringify({ trades: [toRow(trade)] }),
+  });
+  const saved = response.trades?.find((row) => row.id === trade.id);
+  if (!saved) throw new Error("The server did not confirm this entry. Keep the ticket open and retry.");
+  const cached = readJson<TradeRow[]>(CACHE_KEY, []).filter((row) => row.id !== saved.id);
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify([...cached, saved])); } catch { /* Server already persisted this entry. */ }
+  return fromRow(saved);
+}
+
 /** Queue an upsert for background sync (replaces any pending write for the same id). */
 export function queueUpsert(t: Trade): void {
   const q = readJson<TradeRow[]>(QUEUE_KEY, []).filter((r) => r.id !== t.id);

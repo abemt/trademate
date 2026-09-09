@@ -50,6 +50,9 @@ export interface Trade {
   plan_entry: string | null;
   /** One honest takeaway, written at close (required on losses). */
   lesson: string | null;
+  entry_plan_id?: string | null;
+  entry_mode?: "planned" | "unplanned" | null;
+  unplanned_reason?: string | null;
 }
 
 export interface Account {

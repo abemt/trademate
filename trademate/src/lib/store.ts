@@ -1,7 +1,10 @@
 import { create } from "zustand";
 import { api } from "./api";
-import { fetchMergedTrades, flushQueue, queueUpsert } from "./sync";
+import { createTrade, fetchMergedTrades, flushQueue, queueUpsert } from "./sync";
 import type { Account, Trade } from "./trades";
+import type { EntryGateState } from "../../shared/entryGate";
+
+let gateRequest = 0;
 
 export interface Profile {
   id: number;
@@ -43,6 +46,12 @@ interface AppState {
   accounts: Account[];
   logFormOpen: boolean;
   prefill: Partial<Trade> | null;
+  entryGate: EntryGateState | null;
+  entryGateError: string | null;
+  entryGateLoading: boolean;
+  entryGateReceivedAt: number;
+  loadEntryGate: () => Promise<void>;
+  acceptEntryGate: (state: EntryGateState) => void;
   setTab: (tab: Tab) => void;
   setLogFormOpen: (open: boolean) => void;
   setPrefill: (prefill: Partial<Trade> | null) => void;
@@ -66,6 +75,32 @@ export const useApp = create<AppState>((set, get) => ({
   accounts: [],
   logFormOpen: false,
   prefill: null,
+  entryGate: null,
+  entryGateError: null,
+  entryGateLoading: false,
+  entryGateReceivedAt: 0,
+
+  acceptEntryGate: (state) => {
+    const account = get().accounts.find((candidate) => candidate.active === 1 && candidate.archived === 0);
+    if (account?.id !== state.account_id) return;
+    gateRequest++;
+    set({ entryGate: state, entryGateError: null, entryGateLoading: false, entryGateReceivedAt: performance.now() });
+  },
+
+  loadEntryGate: async () => {
+    const request = ++gateRequest;
+    const account = get().accounts.find((candidate) => candidate.active === 1 && candidate.archived === 0);
+    if (!account) { set({ entryGate: null, entryGateLoading: false }); return; }
+    set({ entryGateLoading: true, entryGateError: null });
+    try {
+      const state = await api<EntryGateState>(`/entry-gate?account_id=${encodeURIComponent(account.id)}`);
+      if (request !== gateRequest) return;
+      set({ entryGate: state, entryGateError: null, entryGateLoading: false, entryGateReceivedAt: performance.now() });
+    } catch (error) {
+      if (request !== gateRequest) return;
+      set({ entryGate: null, entryGateLoading: false, entryGateError: error instanceof Error ? error.message : "Entry gate unavailable. Connect to continue." });
+    }
+  },
 
   setTab: (tab) => set({ tab }),
   setLogFormOpen: (logFormOpen) => set({ logFormOpen }),
@@ -113,6 +148,7 @@ export const useApp = create<AppState>((set, get) => ({
     try {
       const r = await api<{ accounts: Account[] }>("/accounts");
       set({ accounts: r.accounts });
+      void get().loadEntryGate();
     } catch {
       // keep current list
     }
@@ -140,9 +176,16 @@ export const useApp = create<AppState>((set, get) => ({
       // offline — pending writes stay queued
     }
     set({ trades: await fetchMergedTrades() });
+    void get().loadEntryGate();
   },
 
   saveTrade: async (t) => {
+    if (!get().trades.some((trade) => trade.id === t.id)) {
+      const saved = await createTrade(t);
+      set((state) => ({ trades: [...state.trades.filter((trade) => trade.id !== saved.id), saved].sort((left, right) => right.opened_at.localeCompare(left.opened_at)) }));
+      await get().loadEntryGate();
+      return;
+    }
     set((s) => {
       const rest = s.trades.filter((x) => x.id !== t.id);
       const next = t.deleted ? rest : [...rest, t];
@@ -155,6 +198,7 @@ export const useApp = create<AppState>((set, get) => ({
     } catch {
       // offline — will flush on reconnect
     }
+    void get().loadEntryGate();
   },
 
   deleteTrade: async (id) => {

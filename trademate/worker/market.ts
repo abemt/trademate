@@ -379,7 +379,20 @@ export async function weeklyReport(env: Env, refresh = false): Promise<Record<st
   const profile = await getProfile(env);
   const tz = String(profile.timezone ?? "Africa/Addis_Ababa");
   const week = mondayOf(localDate(tz));
-  const key = `weekly-${week}`;
+  const account = await env.DB.prepare("SELECT id FROM accounts WHERE active = 1 AND archived = 0 LIMIT 1").first<{ id: string }>();
+  const accountId = account?.id ?? "acc-legacy";
+  let sitOuts = "";
+  try {
+    const rows = await env.DB.prepare(
+      `SELECT date, sit_out_at, sit_out_reason,
+       legacy_count + (SELECT COUNT(*) FROM entry_ledger WHERE account_id = entry_days.account_id AND date = entry_days.date) AS entries
+       FROM entry_days WHERE account_id = ? AND date >= ? AND date <= ? AND sit_out_at IS NOT NULL ORDER BY date`,
+    ).bind(accountId, week, localDate(tz)).all<{ date: string; sit_out_at: string; sit_out_reason: string; entries: number }>();
+    sitOuts = rows.results.map((day) => `${day.date}: ${day.entries === 0 ? "Explicit no-trade discipline win" : `Finished after ${day.entries} entries`}; ${day.sit_out_reason}; committed at ${day.sit_out_at}`).join("\n");
+  } catch { sitOuts = "Sit-out data unavailable; do not infer inactivity was avoidance."; }
+  const signature = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(sitOuts));
+  const revision = Array.from(new Uint8Array(signature).slice(0, 8), (value) => value.toString(16).padStart(2, "0")).join("");
+  const key = `weekly-gate-${accountId}-${week}-${revision}`;
 
   if (!refresh) {
     const cached = await env.DB.prepare("SELECT json FROM briefings WHERE key = ?")
@@ -388,8 +401,11 @@ export async function weeklyReport(env: Env, refresh = false): Promise<Record<st
     if (cached) return JSON.parse(cached.json) as Record<string, unknown>;
   }
 
-  const trades = await recentTrades(env, 40);
-  const weekTrades = trades.filter((t) => t.opened_at.slice(0, 10) >= week);
+  const trades = await recentTrades(env, 1000, accountId);
+  const weekTrades = trades.filter((trade) => {
+    const date = localDate(tz, new Date(trade.opened_at));
+    return date >= week && date <= localDate(tz);
+  });
   let checkins = "";
   try {
     const r = await env.DB.prepare(
@@ -424,11 +440,12 @@ export async function weeklyReport(env: Env, refresh = false): Promise<Record<st
   const prompt = [
     `Write my weekly coaching review (week starting ${week}).`,
     `This week's trades:\n${tradeLines(weekTrades)}`,
+    `Intentional session decisions for this account:\n${sitOuts || "None recorded. Missing decisions are unknown, not a failure."}`,
     dayPlans ? `My written day plans this week (compare planned vs what I actually did — plan adherence is the core of the review):\n${dayPlans}` : "No written day plans this week — mention that writing them is part of the routine.",
     checkins ? `Check-ins:\n${checkins}` : "No check-ins this week.",
     "Weigh plan adherence over P&L: trades matching the written plan (his-plan / waited-for) are wins even when red; trades contradicting the plan are failures even when green. Use my CURRENT rules from the context — not any older limits.",
     weekTrades.length === 0
-      ? "I logged no trades this week — address that directly (was it discipline or avoidance?)."
+      ? "No trades are logged this week. Recognize explicit no-trade discipline wins. Do not call unrecorded days avoidance, invent missed profits, or encourage mediocre entries to fill a quota."
       : "",
     WEEKLY_CONTRACT,
   ]

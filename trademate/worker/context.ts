@@ -1,4 +1,5 @@
 import { MATE_PERSONA, callAI, type AIMessage } from "./ai";
+import type { EntryPlanInput } from "../shared/entryGate";
 
 export interface Env {
   DB: D1Database;
@@ -78,12 +79,12 @@ interface TradeRow {
   mistakes: string | null;
 }
 
-export async function recentTrades(env: Env, limit = 15): Promise<TradeRow[]> {
+export async function recentTrades(env: Env, limit = 15, accountId?: string): Promise<TradeRow[]> {
   try {
     const r = await env.DB.prepare(
-      "SELECT opened_at, direction, setup_type, session, status, pnl_usd, r_multiple, emotions, followed_plan, notes, body_before, urge_before, autopilot, feeling_note, plan_setup, plan_entry, lesson, mistakes FROM trades WHERE deleted = 0 ORDER BY opened_at DESC LIMIT ?",
+      "SELECT opened_at, direction, setup_type, session, status, pnl_usd, r_multiple, emotions, followed_plan, notes, body_before, urge_before, autopilot, feeling_note, plan_setup, plan_entry, lesson, mistakes FROM trades WHERE deleted = 0 AND (? IS NULL OR COALESCE(account_id, 'acc-legacy') = ?) ORDER BY opened_at DESC LIMIT ?",
     )
-      .bind(limit)
+      .bind(accountId ?? null, accountId ?? null, limit)
       .all();
     return r.results as unknown as TradeRow[];
   } catch {
@@ -120,7 +121,6 @@ export function tradeLines(trades: TradeRow[]): string {
 
 export async function traderContext(env: Env): Promise<string> {
   const profile = await getProfile(env);
-  const trades = await recentTrades(env, 15);
   const tz = String(profile.timezone ?? "Africa/Addis_Ababa");
   const today = localDate(tz);
 
@@ -189,13 +189,36 @@ export async function traderContext(env: Env): Promise<string> {
     // columns may not exist yet
   }
 
-  const todayTrades = trades.filter((t) => localDate(tz, new Date(t.opened_at)) === today);
+  const accountHistory = await recentTrades(env, 1000, account.id);
+  const trades = accountHistory.slice(0, 15);
+  const todayTrades = accountHistory.filter((trade) => localDate(tz, new Date(trade.opened_at)) === today);
   const todayCount = todayTrades.length;
   const todayClosed = todayTrades.filter((t) => t.status === "closed" && t.pnl_usd !== null);
   const todayNet = todayClosed.reduce((s, t) => s + (t.pnl_usd ?? 0), 0);
   const todayBreaks = todayTrades.filter((t) => t.followed_plan === 0).length;
   const closed = trades.filter((t) => t.status === "closed" && t.pnl_usd !== null);
   const recentPnl = closed.reduce((s, t) => s + (t.pnl_usd ?? 0), 0);
+
+  let gateLine = "No locked entry-plan or sit-out record available. Missing records are not proof of discipline or avoidance.";
+  try {
+    const day = await env.DB.prepare(
+      `SELECT sit_out_reason, sit_out_at, max_trades,
+       legacy_count + (SELECT COUNT(*) FROM entry_ledger WHERE account_id = entry_days.account_id AND date = entry_days.date) AS entries
+       FROM entry_days WHERE account_id = ? AND date = ?`,
+    ).bind(account.id, today).first<{ sit_out_reason: string | null; sit_out_at: string | null; max_trades: number; entries: number }>();
+    const locked = await env.DB.prepare("SELECT details, created_at, ready_at, confirmed_at FROM entry_plans WHERE account_id = ? AND date = ? AND cancelled_at IS NULL AND used_trade_id IS NULL ORDER BY created_at DESC LIMIT 1")
+      .bind(account.id, today).first<{ details: string; created_at: string; ready_at: string; confirmed_at: string | null }>();
+    const parts: string[] = [];
+    if (day) parts.push(`Entry gate: ${day.entries}/${day.max_trades} entries (including deleted journal records); the day limit cannot be increased mid-session.`);
+    if (day?.sit_out_at) parts.push(`${day.entries === 0 && todayCount === 0 ? "EXPLICIT NO-TRADE DISCIPLINE WIN" : "Finished for today, not a zero-trade win"}: "${day.sit_out_reason}" at ${day.sit_out_at}. No more entries on this account today; do not suggest overriding the lock.`);
+    if (locked) {
+      const details = JSON.parse(locked.details) as EntryPlanInput;
+      parts.push(`LOCKED PRE-ENTRY PLAN at ${locked.created_at}, wait ends ${locked.ready_at}, confirmations ${locked.confirmed_at ?? "not yet attested"}. Bias ${details.bias}, direction ${details.direction}; ${details.thesis}; must see ${details.conditions.join("; ")}; invalidation ${details.invalidation_price}: ${details.invalidation_rule}; walk away if ${details.no_trade_if}. This snapshot overrides editable day-plan notes for this entry.`);
+    }
+    if (parts.length) gateLine = parts.join("\n");
+  } catch {
+    gateLine = "Entry gate data unavailable. Do not infer an unlocked session or invent a no-trade win.";
+  }
 
   let checkinLine = "No check-in yet today.";
   try {
@@ -261,13 +284,14 @@ ${tradeLines(trades)}
 
 === TODAY (${today}) — THE ONLY TRADES THAT COUNT AS TODAY ===
 ${dayPlanLine}
+${gateLine}
 Trades today: ${todayCount} of ${profile.max_trades_per_day} allowed · Net P&L today: ${todayNet >= 0 ? "+" : ""}$${Math.round(todayNet)} · Plan-breaks today: ${todayBreaks}
 ${tradeLines(todayTrades)}
-Judge TODAY strictly from this section. NEVER attribute yesterday's trades to today, and NEVER invent trades that are not listed here. If today shows 0 plan-breaks and he stayed within his limits, today WAS a rule-compliant day — say so and celebrate the discipline.
+Judge TODAY strictly from this account's section. Never attribute another account or day's trades to today. No recorded plan-breaks is not proof that every rule was followed. An explicit sit-out with zero recorded entries is a discipline win, not a missed profit opportunity. No activity without a sit-out record is unknown, not failure. A profitable unplanned trade remains a rule violation. TradeMate records self-attested market conditions and cannot control the broker or guarantee setup quality.
 
 HIS CURRENT CONTRACT (LIVE — the numbers come from his profile and OVERRIDE any older version you remember):
 1. The account's job is REPS, not compounding. Success = rule-compliant trades; balance is irrelevant.
-2. Every trade is graded BEFORE entry (no grade, no trade) and placed as a bracket order (entry+SL+TP together). No staring at 1-minute candles — zone alerts and 15/30-minute glances only.
+2. Lock bias, setup, three specific confirmations, price alert, invalidation and walk-away criteria BEFORE entry. Wait at least 15 minutes, then attest that all three conditions and required candle closes occurred; the entry window lasts five minutes. Cancel and restart for a changed or expired plan. No trade is owed to the market. Place broker protection as required by the trading plan; TradeMate does not place broker orders.
 3. MAX ${profile.max_trades_per_day} trade(s) per day — this number is his CURRENT rule.${Number(profile.max_trades_per_day) === 1 ? " One loss = done for the day." : ""}
 4. SL moves to break-even ONLY after a new structure point confirms beyond entry on a 15-MINUTE CLOSE — never from fear, never on a wick.
 5. Red-flag sentences — call them out the moment you hear them: "one last $10", "one more try", "I'll win it back", or wanting to deposit right after a blowup. That is Autopilot talking, not him.`;

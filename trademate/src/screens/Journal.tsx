@@ -98,12 +98,14 @@ function TradeRow({
             )}
           </span>
           <span className="block text-xs text-ink-400">{meta}</span>
+          {t.entry_mode === "unplanned" && <span className="block text-xs font-semibold text-down">Unplanned entry - rule violation</span>}
         </span>
         <PnlBadge t={t} />
       </button>
 
       {expanded && (
         <div className="border-t border-white/5 px-4 py-3">
+          {t.unplanned_reason && <p className="mb-3 text-sm text-down">{t.unplanned_reason}</p>}
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-300">
             {t.lots !== null && (
               <span>
@@ -239,7 +241,7 @@ export function Journal() {
       <div className="flex items-center justify-between px-1">
         <div>
           <h1 className="text-2xl font-bold text-white">Journal</h1>
-          <p className="mt-1 text-sm text-ink-300">Log it in 20 seconds. Patterns beat shame.</p>
+          <p className="mt-1 text-sm text-ink-300">Planned entries. Honest reviews.</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -254,7 +256,7 @@ export function Journal() {
             onClick={() => openForm(null)}
             className="flex items-center gap-1.5 rounded-xl bg-gold-500 px-3.5 py-2.5 text-sm font-bold text-ink-950 transition hover:bg-gold-400"
           >
-            <IconPlus className="h-4 w-4" /> Log trade
+            <IconPlus className="h-4 w-4" /> Entry checkpoint
           </button>
         </div>
       </div>

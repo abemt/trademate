@@ -6,6 +6,9 @@ import { ScreenshotPicker } from "./ScreenshotPicker";
 import { Sheet } from "./Sheet";
 import { api } from "../lib/api";
 import { useApp } from "../lib/store";
+import { EntryGate } from "./EntryGate";
+import { useEntryGate } from "../lib/useEntryGate";
+import { ENTRY_SETUPS, ENTRY_WINDOW_MS, planBlock, type EntryPlan } from "../../shared/entryGate";
 import {
   BODY_SCALE,
   CONFLUENCES,
@@ -69,22 +72,36 @@ function ScaleRow({
   );
 }
 
-function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open">) {
+function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanned = false, onBack }: Omit<Props, "open"> & {
+  lockedPlan?: EntryPlan;
+  unplanned?: boolean;
+  onBack?: () => void;
+}) {
   const profile = useApp((s) => s.profile);
   const saveTrade = useApp((s) => s.saveTrade);
   const trades = useApp((s) => s.trades);
   const accounts = useApp((s) => s.accounts);
   const activeAccount = accounts.find((a) => a.active === 1 && a.archived === 0) ?? null;
+  const gate = useEntryGate();
+  const protectedPlan = Boolean(lockedPlan || existing?.entry_mode === "planned");
+  const violation = unplanned || existing?.entry_mode === "unplanned";
+  const [tradeId] = useState(() => existing?.id ?? crypto.randomUUID());
+  const [saving, setSaving] = useState(false);
+  const [unplannedReason, setUnplannedReason] = useState(existing?.unplanned_reason ?? "");
+  const [actualEntry, setActualEntry] = useState(() => {
+    const date = new Date(existing?.opened_at ?? Date.now());
+    return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+  });
   const accountSize = currentBalance(
     activeAccount?.starting_balance ?? profile?.account_size ?? 10_000,
     accountTrades(trades, activeAccount?.id ?? null),
   );
 
   const base = existing ?? prefill ?? null;
-  const initialSetup = base?.setup_type ?? null;
+  const initialSetup = lockedPlan ? ENTRY_SETUPS.find((candidate) => candidate.id === lockedPlan.details.setup)!.label : base?.setup_type ?? null;
   const isKnownSetup = initialSetup === null || SETUPS.some((s) => s.id === initialSetup);
 
-  const [direction, setDirection] = useState<"long" | "short" | null>(base?.direction ?? null);
+  const [direction, setDirection] = useState<"long" | "short" | null>(lockedPlan?.details.direction ?? base?.direction ?? null);
   const [setup, setSetup] = useState<string | null>(isKnownSetup ? initialSetup : "other");
   const [customSetup, setCustomSetup] = useState<string>(
     isKnownSetup ? "" : (initialSetup as string),
@@ -123,8 +140,8 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
   const [planId, setPlanId] = useState<string | null>(base?.plan_id ?? null);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [plansOpen, setPlansOpen] = useState(false);
-  const [planSetup, setPlanSetup] = useState<string>(base?.plan_setup ?? "");
-  const [planEntry, setPlanEntry] = useState<string>(base?.plan_entry ?? "");
+  const [planSetup, setPlanSetup] = useState<string>(lockedPlan ? `${lockedPlan.details.bias.toUpperCase()}: ${lockedPlan.details.thesis}` : base?.plan_setup ?? "");
+  const [planEntry, setPlanEntry] = useState<string>(lockedPlan ? `${lockedPlan.details.conditions.join("\n")}\nInvalidation: ${lockedPlan.details.invalidation_price} - ${lockedPlan.details.invalidation_rule}\nWalk away: ${lockedPlan.details.no_trade_if}` : base?.plan_entry ?? "");
   const [lesson, setLesson] = useState<string>(base?.lesson ?? "");
   const [dayPlan, setDayPlan] = useState<{ bias: string | null; must_see: string | null } | null>(null);
   const [autopilot, setAutopilot] = useState<number | null>(
@@ -159,13 +176,21 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
     set(list.includes(id) ? list.filter((e) => e !== id) : [...list, id]);
   }
 
-  function save() {
-    if (!direction) {
-      setError("Long or short?");
+  async function save() {
+    if (saving) return;
+    if (!existing && !violation) {
+      const blocked = gate.state ? planBlock(gate.state, gate.now, true) : "Entry gate unavailable. Connect before logging a planned entry.";
+      if (gate.loading || blocked || !lockedPlan || gate.state?.plan?.id !== lockedPlan.id) {
+        setError(blocked ?? "The locked plan changed. Return to the entry gate.");
+        return;
+      }
+    }
+    if (!existing && violation && (unplannedReason.trim().length < 12 || !Number.isFinite(Date.parse(actualEntry)) || Date.parse(actualEntry) > Date.now())) {
+      setError("Record the actual entry time and what happened without a pre-entry plan (at least 12 characters).");
       return;
     }
-    if (!existing && !closeMode && (planSetup.trim().length < 5 || planEntry.trim().length < 5)) {
-      setError("Write the plan first — setup + what you're waiting for. No written plan, no trade. That's the rule you gave yourself.");
+    if (!direction) {
+      setError("Long or short?");
       return;
     }
     if (bodyBefore === null || urgeBefore === null) {
@@ -195,7 +220,7 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
     }
     const now = new Date().toISOString();
     const trade: Trade = {
-      id: existing?.id ?? crypto.randomUUID(),
+      id: tradeId,
       instrument: "XAUUSD",
       direction,
       setup_type: setup === "other" && customSetup.trim() !== "" ? customSetup.trim() : setup,
@@ -219,9 +244,9 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
       status: isClosed ? "closed" : "open",
       emotions,
       screenshots,
-      followed_plan: isClosed ? followedPlan : null,
+      followed_plan: violation ? 0 : isClosed ? followedPlan : null,
       notes: notes.trim() === "" ? null : notes.trim(),
-      opened_at: existing?.opened_at ?? now,
+      opened_at: existing?.opened_at ?? (violation ? new Date(actualEntry).toISOString() : now),
       closed_at: isClosed ? (existing?.closed_at ?? now) : null,
       updated_at: now,
       deleted: 0,
@@ -237,17 +262,40 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
       confluences,
       mistakes: isClosed ? mistakes : [],
       plan_id: planId,
-      plan_setup: planSetup.trim() === "" ? null : planSetup.trim(),
-      plan_entry: planEntry.trim() === "" ? null : planEntry.trim(),
+      plan_setup: violation ? null : planSetup.trim() === "" ? null : planSetup.trim(),
+      plan_entry: violation ? null : planEntry.trim() === "" ? null : planEntry.trim(),
       lesson: isClosed && lesson.trim() !== "" ? lesson.trim() : (existing?.lesson ?? null),
+      entry_plan_id: existing?.entry_plan_id ?? lockedPlan?.id ?? null,
+      entry_mode: existing ? existing.entry_mode : violation ? "unplanned" : "planned",
+      unplanned_reason: violation ? unplannedReason.trim() : null,
     };
-    void saveTrade(trade);
-    onClose();
+    setSaving(true);
+    setError("");
+    try {
+      await saveTrade(trade);
+      onClose();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : "Trade not saved. Keep this ticket open and retry.");
+    } finally { setSaving(false); }
   }
 
   return (
     <div className="space-y-5">
-      <div>
+      {onBack && <button type="button" onClick={onBack} disabled={saving} className="text-sm font-semibold text-gold-400">Back to entry gate</button>}
+      {lockedPlan && <div role="status" className="space-y-1 border-b border-white/10 pb-3 text-xs text-ink-200">
+        <p>Plan locked: {new Date(lockedPlan.created_at).toLocaleString()}</p>
+        <p className="font-semibold text-gold-400">{gate.state && gate.state.plan?.id === lockedPlan.id && !planBlock(gate.state, gate.now, true) ? `Entry window: ${Math.max(0, Math.ceil((Date.parse(lockedPlan.confirmed_at!) + ENTRY_WINDOW_MS - gate.now) / 1000))}s remaining` : "Entry permission expired or unavailable. Return to the gate."}</p>
+      </div>}
+      {violation && <div className="space-y-3 border-y border-down/30 py-3">
+        <p className="text-sm font-semibold text-down">Unplanned entry - rule violation</p>
+        <label className="block text-xs text-ink-200">What happened before this entry?
+          <textarea required readOnly={Boolean(existing)} minLength={12} maxLength={2000} rows={3} value={unplannedReason} onChange={(event) => setUnplannedReason(event.target.value)} className="mt-1 block w-full rounded-lg border border-white/10 bg-ink-800 px-3 py-2 text-sm text-white" />
+        </label>
+        {!existing && <label className="block text-xs text-ink-200">Actual entry time (device timezone)
+          <input type="datetime-local" required value={actualEntry} onChange={(event) => setActualEntry(event.target.value)} className="mt-1 block w-full min-w-0 rounded-lg border border-white/10 bg-ink-800 px-3 py-2 text-sm text-white" />
+        </label>}
+      </div>}
+      <fieldset disabled={protectedPlan}>
         <FieldLabel>Direction</FieldLabel>
         <div className="grid grid-cols-2 gap-2">
           <button
@@ -273,11 +321,11 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
             <IconTrendDown className="h-4.5 w-4.5" /> SHORT
           </button>
         </div>
-      </div>
+      </fieldset>
 
-      <div className="rounded-2xl border border-gold-500/25 bg-gold-500/5 p-3.5">
+      {!violation && <div className="rounded-2xl border border-gold-500/25 bg-gold-500/5 p-3.5">
         <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-gold-400">
-          Written plan · required before entry
+          {protectedPlan ? "Locked pre-entry plan" : "Recorded plan"}
         </p>
         <p className="mb-3 text-[11px] leading-snug text-ink-400">
           The contract with yourself. If price does something else — there is no trade.
@@ -291,6 +339,7 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
         )}
         <FieldLabel>Setup — bias + why</FieldLabel>
         <textarea
+          readOnly={protectedPlan}
           value={planSetup}
           onChange={(e) => setPlanSetup(e.target.value)}
           rows={2}
@@ -300,14 +349,15 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
         <div className="mt-3">
           <FieldLabel>Planned entry — what exactly are you waiting for?</FieldLabel>
           <textarea
+            readOnly={protectedPlan}
             value={planEntry}
             onChange={(e) => setPlanEntry(e.target.value)}
-            rows={2}
+            rows={protectedPlan ? 7 : 2}
             placeholder='e.g. "Wait for clean double top on M15 — no double top, no entry"'
             className="w-full resize-none rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60"
           />
         </div>
-      </div>
+      </div>}
 
       <div className="rounded-2xl border border-gold-500/25 bg-gold-500/5 p-3.5">
         <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-gold-400">
@@ -334,7 +384,7 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
         </div>
       </div>
 
-      <div>
+      <fieldset disabled={protectedPlan}>
         <FieldLabel>Setup</FieldLabel>
         <ChipRow>
           {SETUPS.map((s) => (
@@ -353,7 +403,7 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
             className="mt-2 w-full rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60"
           />
         )}
-      </div>
+      </fieldset>
 
       <div>
         <div className="mb-2 flex items-center justify-between">
@@ -460,7 +510,7 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
         />
       </div>
 
-      {!closeMode && (
+      {!closeMode && !lockedPlan && existing?.status !== "closed" && (
         <div>
           <FieldLabel>Status</FieldLabel>
           <div className="grid grid-cols-2 gap-2">
@@ -499,12 +549,10 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
           <div className="mt-3">
             <FieldLabel>Did you follow your plan?</FieldLabel>
             <div className="grid grid-cols-2 gap-2">
-              <Chip active={followedPlan === 1} onClick={() => setFollowedPlan(1)}>
-                Followed my plan
-              </Chip>
-              <Chip active={followedPlan === 0} onClick={() => setFollowedPlan(0)}>
-                Broke my plan
-              </Chip>
+              {violation ? <p className="col-span-2 text-sm text-down">No pre-entry plan was recorded.</p> : <>
+                <Chip active={followedPlan === 1} onClick={() => setFollowedPlan(1)}>Followed my plan</Chip>
+                <Chip active={followedPlan === 0} onClick={() => setFollowedPlan(0)}>Broke my plan</Chip>
+              </>}
             </div>
           </div>
           <div className="mt-3 rounded-2xl border border-gold-500/25 bg-gold-500/5 p-3.5">
@@ -627,33 +675,45 @@ function FormInner({ onClose, existing, prefill, closeMode }: Omit<Props, "open"
         className="w-full resize-none rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60"
       />
 
-      {error && <p className="text-sm text-down">{error}</p>}
+      {error && <p role="alert" className="text-sm text-down">{error}</p>}
 
       <button
         type="button"
-        onClick={save}
-        className="w-full rounded-xl bg-gold-500 py-3 font-semibold text-ink-950 transition hover:bg-gold-400"
+        onClick={() => void save()}
+        disabled={saving || (!existing && !violation && (gate.loading || !gate.state || Boolean(planBlock(gate.state, gate.now, true)) || gate.state.plan?.id !== lockedPlan?.id))}
+        className="w-full rounded-xl bg-gold-500 py-3 font-semibold text-ink-950 transition hover:bg-gold-400 disabled:cursor-not-allowed disabled:opacity-40"
       >
-        {closeMode ? "Close trade" : existing ? "Save changes" : isClosed ? "Log trade" : "I'm in — log it"}
+        {saving ? "Saving..." : closeMode ? "Close trade" : existing ? "Save changes" : violation ? "Record unplanned trade" : "Log planned entry"}
       </button>
     </div>
   );
 }
 
+function NewTradeGate({ onClose, prefill }: Pick<Props, "onClose" | "prefill">) {
+  const gate = useEntryGate();
+  const [ticket, setTicket] = useState<{ plan?: EntryPlan; unplanned?: boolean } | null>(() => {
+    const confirmed = gate.state?.plan;
+    return confirmed && gate.state && !planBlock(gate.state, gate.now, true) ? { plan: confirmed } : null;
+  });
+  if (ticket) return <FormInner onClose={onClose} prefill={prefill} lockedPlan={ticket.plan} unplanned={ticket.unplanned} onBack={() => setTicket(null)} />;
+  return <EntryGate onReady={(state) => setTicket({ plan: state.plan! })} onUnplanned={() => setTicket({ unplanned: true })} />;
+}
+
 export function TradeForm({ open, onClose, existing, prefill, closeMode }: Props) {
+  const accountId = useApp((state) => state.accounts.find((account) => account.active === 1 && account.archived === 0)?.id);
   return (
     <Sheet
       open={open}
       onClose={onClose}
-      title={closeMode ? "Close trade" : existing ? "Edit trade" : "Log a trade"}
+      title={closeMode ? "Close trade" : existing ? "Edit trade" : "Pre-entry checkpoint"}
     >
-      <FormInner
+      {existing ? <FormInner
         key={existing?.id ?? (prefill ? "prefill" : "new")}
         onClose={onClose}
         existing={existing}
         prefill={prefill}
         closeMode={closeMode}
-      />
+      /> : <NewTradeGate key={accountId ?? "no-account"} onClose={onClose} prefill={prefill} />}
     </Sheet>
   );
 }
