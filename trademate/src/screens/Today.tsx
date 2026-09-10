@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Card } from "../components/Card";
-import { EntryGate } from "../components/EntryGate";
+import { SitOutControl } from "../components/EntryGate";
 import { tradingDate } from "../../shared/entryGate";
 import {
   IconClock,
@@ -166,8 +166,8 @@ function TradeTokens() {
           {over
             ? `${used} of ${max}. Past your rule — log honestly, close the charts. Patterns beat shame.`
             : left === 0
-              ? "Daily limit reached. No extra entry."
-              : state?.sit_out ? "Finished for today. Unused entries are not a target." : `${left} possible entr${left === 1 ? "y" : "ies"} remaining. None are owed to the market.`}
+              ? "Both used. You're done for today — win or lose, that was YOUR rule."
+              : state?.sit_out ? "Done for today. Unused tokens are not a target." : `${left} trade${left === 1 ? "" : "s"} left today. Plan first, then enter.`}
         </p>
       </div>
       <motion.button
@@ -178,8 +178,9 @@ function TradeTokens() {
         }}
         className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-gold-500 py-3 font-semibold text-ink-950 transition hover:bg-gold-400"
       >
-        <IconPlus className="h-4.5 w-4.5" /> Entry checkpoint
+        <IconPlus className="h-4.5 w-4.5" /> Log a trade
       </motion.button>
+      <SitOutControl />
     </Card>
   );
 }
@@ -580,12 +581,9 @@ export function Today() {
   const accounts = useApp((s) => s.accounts);
   const active = accounts.find((a) => a.active === 1 && a.archived === 0) ?? null;
   const isProp = active ? active.type === "prop_eval" || active.type === "prop_funded" : false;
-  const setTab = useApp((state) => state.setTab);
-  const setLogFormOpen = useApp((state) => state.setLogFormOpen);
   return (
     <div className="space-y-4">
       <Greeting now={now} />
-      <EntryGate key={active?.id ?? "no-account"} onReady={() => { setTab("journal"); setLogFormOpen(true); }} />
       <DashboardStats />
       <div className="space-y-4 lg:grid lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start lg:gap-4 lg:space-y-0">
         <div className="space-y-4">

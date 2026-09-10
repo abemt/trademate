@@ -241,7 +241,7 @@ export function Journal() {
       <div className="flex items-center justify-between px-1">
         <div>
           <h1 className="text-2xl font-bold text-white">Journal</h1>
-          <p className="mt-1 text-sm text-ink-300">Planned entries. Honest reviews.</p>
+          <p className="mt-1 text-sm text-ink-300">Plan first, then log it. Patterns beat shame.</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -256,7 +256,7 @@ export function Journal() {
             onClick={() => openForm(null)}
             className="flex items-center gap-1.5 rounded-xl bg-gold-500 px-3.5 py-2.5 text-sm font-bold text-ink-950 transition hover:bg-gold-400"
           >
-            <IconPlus className="h-4 w-4" /> Entry checkpoint
+            <IconPlus className="h-4 w-4" /> Log trade
           </button>
         </div>
       </div>

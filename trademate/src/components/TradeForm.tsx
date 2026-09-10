@@ -6,9 +6,9 @@ import { ScreenshotPicker } from "./ScreenshotPicker";
 import { Sheet } from "./Sheet";
 import { api } from "../lib/api";
 import { useApp } from "../lib/store";
-import { EntryGate } from "./EntryGate";
+import { EntryGate, PlanSummary } from "./EntryGate";
 import { useEntryGate } from "../lib/useEntryGate";
-import { ENTRY_SETUPS, ENTRY_WINDOW_MS, planBlock, type EntryPlan } from "../../shared/entryGate";
+import { ENTRY_SETUPS, planBlock, type EntryPlan } from "../../shared/entryGate";
 import {
   BODY_SCALE,
   CONFLUENCES,
@@ -179,14 +179,14 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
   async function save() {
     if (saving) return;
     if (!existing && !violation) {
-      const blocked = gate.state ? planBlock(gate.state, gate.now, true) : "Entry gate unavailable. Connect before logging a planned entry.";
+      const blocked = gate.state ? planBlock(gate.state, gate.now) : "Can't reach the server — the entry needs the saved plan.";
       if (gate.loading || blocked || !lockedPlan || gate.state?.plan?.id !== lockedPlan.id) {
-        setError(blocked ?? "The locked plan changed. Return to the entry gate.");
+        setError(blocked ?? "The plan changed. Go back and check it.");
         return;
       }
     }
-    if (!existing && violation && (unplannedReason.trim().length < 12 || !Number.isFinite(Date.parse(actualEntry)) || Date.parse(actualEntry) > Date.now())) {
-      setError("Record the actual entry time and what happened without a pre-entry plan (at least 12 characters).");
+    if (!existing && violation && (unplannedReason.trim().length < 3 || !Number.isFinite(Date.parse(actualEntry)) || Date.parse(actualEntry) > Date.now())) {
+      setError("Enter the real entry time and a few words on what happened.");
       return;
     }
     if (!direction) {
@@ -281,15 +281,15 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
 
   return (
     <div className="space-y-5">
-      {onBack && <button type="button" onClick={onBack} disabled={saving} className="text-sm font-semibold text-gold-400">Back to entry gate</button>}
-      {lockedPlan && <div role="status" className="space-y-1 border-b border-white/10 pb-3 text-xs text-ink-200">
-        <p>Plan locked: {new Date(lockedPlan.created_at).toLocaleString()}</p>
-        <p className="font-semibold text-gold-400">{gate.state && gate.state.plan?.id === lockedPlan.id && !planBlock(gate.state, gate.now, true) ? `Entry window: ${Math.max(0, Math.ceil((Date.parse(lockedPlan.confirmed_at!) + ENTRY_WINDOW_MS - gate.now) / 1000))}s remaining` : "Entry permission expired or unavailable. Return to the gate."}</p>
-      </div>}
+      {onBack && <button type="button" onClick={onBack} disabled={saving} className="text-sm font-semibold text-gold-400">‹ Back to the plan</button>}
+      {lockedPlan && <PlanSummary plan={lockedPlan} timezone={gate.state?.timezone ?? "Africa/Addis_Ababa"} />}
+      {lockedPlan && gate.state && (gate.state.plan?.id !== lockedPlan.id || planBlock(gate.state, gate.now)) && (
+        <p role="status" className="text-sm text-down">{planBlock(gate.state, gate.now) ?? "This plan was replaced. Go back and check it."}</p>
+      )}
       {violation && <div className="space-y-3 border-y border-down/30 py-3">
-        <p className="text-sm font-semibold text-down">Unplanned entry - rule violation</p>
-        <label className="block text-xs text-ink-200">What happened before this entry?
-          <textarea required readOnly={Boolean(existing)} minLength={12} maxLength={2000} rows={3} value={unplannedReason} onChange={(event) => setUnplannedReason(event.target.value)} className="mt-1 block w-full rounded-lg border border-white/10 bg-ink-800 px-3 py-2 text-sm text-white" />
+        <p className="text-sm font-semibold text-down">Unplanned entry — rule break</p>
+        <label className="block text-xs text-ink-200">What happened?
+          <textarea required readOnly={Boolean(existing)} minLength={3} maxLength={2000} rows={2} placeholder='e.g. "saw the move and jumped in — no plan"' value={unplannedReason} onChange={(event) => setUnplannedReason(event.target.value)} className="mt-1 block w-full rounded-lg border border-white/10 bg-ink-800 px-3 py-2 text-sm text-white placeholder:text-ink-400" />
         </label>
         {!existing && <label className="block text-xs text-ink-200">Actual entry time (device timezone)
           <input type="datetime-local" required value={actualEntry} onChange={(event) => setActualEntry(event.target.value)} className="mt-1 block w-full min-w-0 rounded-lg border border-white/10 bg-ink-800 px-3 py-2 text-sm text-white" />
@@ -323,9 +323,9 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
         </div>
       </fieldset>
 
-      {!violation && <div className="rounded-2xl border border-gold-500/25 bg-gold-500/5 p-3.5">
+      {!violation && !lockedPlan && <div className="rounded-2xl border border-gold-500/25 bg-gold-500/5 p-3.5">
         <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-gold-400">
-          {protectedPlan ? "Locked pre-entry plan" : "Recorded plan"}
+          {protectedPlan ? "Plan (locked before entry)" : "Recorded plan"}
         </p>
         <p className="mb-3 text-[11px] leading-snug text-ink-400">
           The contract with yourself. If price does something else — there is no trade.
@@ -510,7 +510,7 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
         />
       </div>
 
-      {!closeMode && !lockedPlan && existing?.status !== "closed" && (
+      {!closeMode && existing?.status !== "closed" && (
         <div>
           <FieldLabel>Status</FieldLabel>
           <div className="grid grid-cols-2 gap-2">
@@ -680,10 +680,10 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
       <button
         type="button"
         onClick={() => void save()}
-        disabled={saving || (!existing && !violation && (gate.loading || !gate.state || Boolean(planBlock(gate.state, gate.now, true)) || gate.state.plan?.id !== lockedPlan?.id))}
+        disabled={saving || (!existing && !violation && (gate.loading || !gate.state || Boolean(planBlock(gate.state, gate.now)) || gate.state.plan?.id !== lockedPlan?.id))}
         className="w-full rounded-xl bg-gold-500 py-3 font-semibold text-ink-950 transition hover:bg-gold-400 disabled:cursor-not-allowed disabled:opacity-40"
       >
-        {saving ? "Saving..." : closeMode ? "Close trade" : existing ? "Save changes" : violation ? "Record unplanned trade" : "Log planned entry"}
+        {saving ? "Saving..." : closeMode ? "Close trade" : existing ? "Save changes" : violation ? "Log rule break" : isClosed ? "Log trade" : "I'm in — log it"}
       </button>
     </div>
   );
@@ -692,8 +692,8 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
 function NewTradeGate({ onClose, prefill }: Pick<Props, "onClose" | "prefill">) {
   const gate = useEntryGate();
   const [ticket, setTicket] = useState<{ plan?: EntryPlan; unplanned?: boolean } | null>(() => {
-    const confirmed = gate.state?.plan;
-    return confirmed && gate.state && !planBlock(gate.state, gate.now, true) ? { plan: confirmed } : null;
+    const live = gate.state?.plan;
+    return live && gate.state && !planBlock(gate.state, gate.now) ? { plan: live } : null;
   });
   if (ticket) return <FormInner onClose={onClose} prefill={prefill} lockedPlan={ticket.plan} unplanned={ticket.unplanned} onBack={() => setTicket(null)} />;
   return <EntryGate onReady={(state) => setTicket({ plan: state.plan! })} onUnplanned={() => setTicket({ unplanned: true })} />;
@@ -705,7 +705,7 @@ export function TradeForm({ open, onClose, existing, prefill, closeMode }: Props
     <Sheet
       open={open}
       onClose={onClose}
-      title={closeMode ? "Close trade" : existing ? "Edit trade" : "Pre-entry checkpoint"}
+      title={closeMode ? "Close trade" : existing ? "Edit trade" : "Log a trade"}
     >
       {existing ? <FormInner
         key={existing?.id ?? (prefill ? "prefill" : "new")}

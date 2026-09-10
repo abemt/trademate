@@ -1,6 +1,3 @@
-export const PLAN_WAIT_MS = 15 * 60 * 1000;
-export const ENTRY_WINDOW_MS = 5 * 60 * 1000;
-
 export const ENTRY_SETUPS = [
   { id: "m15_double", label: "M15 double top / bottom" },
   { id: "h1_rejection", label: "H1 rejection" },
@@ -12,12 +9,13 @@ export interface EntryPlanInput {
   direction: "long" | "short";
   setup: typeof ENTRY_SETUPS[number]["id"];
   thesis: string;
-  alert_price: number;
-  invalidation_price: number;
-  invalidation_rule: string;
   conditions: [string, string, string];
-  no_trade_if: string;
-  alert_set: boolean;
+  invalidation_price: number;
+  // Optional since v2; plans locked before 2026-09-10 always carry them.
+  invalidation_rule?: string;
+  alert_price?: number;
+  no_trade_if?: string;
+  alert_set?: boolean;
 }
 
 export interface EntryPlan {
@@ -52,11 +50,11 @@ export function tradingDate(timezone: string, now = Date.now()): string {
 }
 
 export function validateEntryPlan(input: unknown): EntryPlanInput {
-  if (!input || typeof input !== "object") throw new Error("Write your entry plan first.");
+  if (!input || typeof input !== "object") throw new Error("Write your plan first.");
   const value = input as Record<string, unknown>;
-  const sentence = (field: unknown, label: string, limit = 1000): string => {
-    if (typeof field !== "string" || field.trim().length < 12 || field.trim().length > limit || !/[a-z\p{L}]/iu.test(field)) {
-      throw new Error(`${label}: write a specific condition (12-${limit} characters).`);
+  const text = (field: unknown, label: string, limit: number): string => {
+    if (typeof field !== "string" || field.trim().length < 3 || field.trim().length > limit || !/[a-z\p{L}]/iu.test(field)) {
+      throw new Error(`${label}: a few words are enough (3-${limit} characters).`);
     }
     return field.trim();
   };
@@ -64,58 +62,44 @@ export function validateEntryPlan(input: unknown): EntryPlanInput {
     if (typeof field !== "number" || !Number.isFinite(field) || field <= 0) throw new Error(`${label}: enter a positive price.`);
     return field;
   };
+  const given = (field: unknown) => field !== undefined && field !== null && field !== "";
   if (!["bullish", "bearish", "neutral"].includes(String(value.bias))) throw new Error("Choose today's bias.");
-  if (value.direction !== "long" && value.direction !== "short") throw new Error("Choose the planned direction.");
+  if (value.direction !== "long" && value.direction !== "short") throw new Error("Choose the direction.");
   if (!ENTRY_SETUPS.some((setup) => setup.id === value.setup)) throw new Error("Choose a playbook setup.");
   if ((value.bias === "bullish" && value.direction === "short") || (value.bias === "bearish" && value.direction === "long")) {
-    throw new Error("The entry direction conflicts with the locked daily bias.");
+    throw new Error("The direction contradicts your daily bias. Change the bias or skip the trade.");
   }
-  if (!Array.isArray(value.conditions) || value.conditions.length !== 3) throw new Error("Write all three confirmations.");
-  const conditions = value.conditions.map((condition, index) => sentence(condition, `Confirmation ${index + 1}`, 500)) as [string, string, string];
+  if (!Array.isArray(value.conditions) || value.conditions.length !== 3) throw new Error("Write the three things you must see.");
+  const conditions = value.conditions.map((condition, index) => text(condition, `Must see ${index + 1}`, 500)) as [string, string, string];
   if (new Set(conditions.map((condition) => condition.toLowerCase().replace(/\W/g, ""))).size !== 3) {
-    throw new Error("Use three different confirmations.");
+    throw new Error("The three confirmations must be different.");
   }
-  if (value.alert_set !== true) throw new Error("Set your price alert before locking the plan.");
-  return {
+  const plan: EntryPlanInput = {
     bias: value.bias as EntryPlanInput["bias"], direction: value.direction,
-    setup: value.setup as EntryPlanInput["setup"], thesis: sentence(value.thesis, "Bias and setup rationale"),
-    alert_price: price(value.alert_price, "Alert level"),
-    invalidation_price: price(value.invalidation_price, "Invalidation level"),
-    invalidation_rule: sentence(value.invalidation_rule, "Invalidation rule"),
-    conditions, no_trade_if: sentence(value.no_trade_if, "Walk-away condition"), alert_set: true,
+    setup: value.setup as EntryPlanInput["setup"], thesis: text(value.thesis, "Why this trade", 1000),
+    conditions, invalidation_price: price(value.invalidation_price, "Invalidation price"),
   };
+  if (given(value.alert_price)) plan.alert_price = price(value.alert_price, "Alert level");
+  if (given(value.invalidation_rule)) plan.invalidation_rule = text(value.invalidation_rule, "Invalidation rule", 1000);
+  if (given(value.no_trade_if)) plan.no_trade_if = text(value.no_trade_if, "Walk-away condition", 1000);
+  return plan;
 }
 
 export function sessionBlock(state: EntryGateState, now = Date.now()): string | null {
-  if (tradingDate(state.timezone, now) !== state.date) return "A new trading day has started. Refresh the gate.";
-  if (state.sit_out) return "Trading is finished for this account today.";
-  if (state.trade_count >= state.max_trades) return "Daily trade limit reached. No extra trade.";
-  if (state.open_count > 0) return "Manage the existing position before planning another entry.";
+  if (tradingDate(state.timezone, now) !== state.date) return "A new trading day has started. Refresh.";
+  if (state.sit_out) return "You finished trading for today. Entries are locked.";
+  if (state.trade_count >= state.max_trades) return `Daily limit reached (${state.max_trades}). No extra trade.`;
   return null;
 }
 
-export function planBlock(state: EntryGateState, now = Date.now(), requireConfirmation = false): string | null {
+export function planBlock(state: EntryGateState, now = Date.now()): string | null {
   const blocked = sessionBlock(state, now);
   if (blocked) return blocked;
   const plan = state.plan;
-  if (!plan) return "Lock a plan before entry.";
+  if (!plan) return "Write the plan before you enter.";
   if (plan.account_id !== state.account_id || plan.date !== state.date) return "This plan belongs to another account or day.";
-  if (plan.cancelled_at || plan.used_trade_id) return "This plan is no longer available. A new entry needs a new plan.";
-  const created = Date.parse(plan.created_at);
-  const ready = Date.parse(plan.ready_at);
-  if (!Number.isFinite(created) || !Number.isFinite(ready) || ready < created + PLAN_WAIT_MS) return "The plan timing is invalid.";
-  if (now < ready) return "The 15-minute planning wait is still running.";
-  if (plan.confirmed_at) {
-    const confirmed = Date.parse(plan.confirmed_at);
-    if (!Number.isFinite(confirmed) || confirmed < ready || now < confirmed || now >= confirmed + ENTRY_WINDOW_MS) {
-      return "The entry window expired. Cancel this plan and reassess.";
-    }
-  } else if (requireConfirmation) return "Confirm all three market conditions before entry.";
+  if (plan.cancelled_at || plan.used_trade_id) return "This plan was already used or cancelled. Write a new one.";
   return null;
-}
-
-export function allConfirmed(value: unknown): boolean {
-  return Array.isArray(value) && value.length === 3 && value.every((answer) => answer === true);
 }
 
 export function noTradeWin(state: EntryGateState): boolean {

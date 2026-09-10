@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { getProfile, type Env } from "./context";
 import {
-  allConfirmed, ENTRY_SETUPS, PLAN_WAIT_MS, planBlock, sessionBlock, tradingDate,
+  ENTRY_SETUPS, planBlock, sessionBlock, tradingDate,
   validateEntryPlan, type EntryGateState, type EntryPlan, type EntryPlanInput,
 } from "../shared/entryGate";
 
@@ -59,41 +59,25 @@ entryGateRoutes.get("/entry-gate", async (context) => {
 });
 
 entryGateRoutes.post("/entry-gate/plans", async (context) => {
-  const body = await context.req.json<{ account_id: string; details: unknown; not_entered: boolean }>();
-  if (body.not_entered !== true) throw new Error("An entry plan must be written before placing an order.");
+  const body = await context.req.json<{ account_id: string; details: unknown }>();
   const details = validateEntryPlan(body.details);
   const now = Date.now();
   const state = await entryState(context.env, body.account_id, now);
   const blocked = sessionBlock(state, now);
   if (blocked) throw new Error(blocked);
-  if (state.plan) throw new Error("Cancel the existing plan before replacing it. The wait will restart.");
-  await context.env.DB.prepare(
-    `INSERT INTO entry_plans (id,account_id,date,details,created_at,ready_at)
-     SELECT ?,?,?,?,?,? WHERE NOT EXISTS (
-       SELECT 1 FROM entry_days WHERE account_id = ? AND date = ? AND sit_out_at IS NOT NULL
-     )`,
-  ).bind(crypto.randomUUID(), state.account_id, state.date, JSON.stringify(details), new Date(now).toISOString(), new Date(now + PLAN_WAIT_MS).toISOString(), state.account_id, state.date).run();
+  const stamp = new Date(now).toISOString();
+  // A fresh plan supersedes an unused one; the old snapshot is kept as cancelled.
+  await context.env.DB.batch([
+    context.env.DB.prepare("UPDATE entry_plans SET cancelled_at = ? WHERE account_id = ? AND date = ? AND used_trade_id IS NULL AND cancelled_at IS NULL")
+      .bind(stamp, state.account_id, state.date),
+    context.env.DB.prepare(
+      `INSERT INTO entry_plans (id,account_id,date,details,created_at,ready_at,confirmed_at)
+       SELECT ?,?,?,?,?,?,? WHERE NOT EXISTS (
+         SELECT 1 FROM entry_days WHERE account_id = ? AND date = ? AND sit_out_at IS NOT NULL
+       )`,
+    ).bind(crypto.randomUUID(), state.account_id, state.date, JSON.stringify(details), stamp, stamp, stamp, state.account_id, state.date),
+  ]);
   return context.json(await entryState(context.env, state.account_id), 201);
-});
-
-entryGateRoutes.post("/entry-gate/plans/:id/confirm", async (context) => {
-  const body = await context.req.json<{ confirmations: unknown; not_entered: boolean; invalidation_clear: boolean }>();
-  if (!allConfirmed(body.confirmations) || body.not_entered !== true || body.invalidation_clear !== true) {
-    throw new Error("All three conditions must have occurred, required candles must be closed, and invalidation must remain intact before entry.");
-  }
-  const plan = await context.env.DB.prepare("SELECT * FROM entry_plans WHERE id = ?").bind(context.req.param("id")).first<PlanRow>();
-  if (!plan) throw new Error("Entry plan not found.");
-  const now = Date.now();
-  const state = await entryState(context.env, plan.account_id, now);
-  if (state.plan?.id !== plan.id) throw new Error("This plan is no longer active.");
-  const blocked = planBlock(state, now);
-  if (blocked) throw new Error(blocked);
-  await context.env.DB.prepare(
-    `UPDATE entry_plans SET confirmed_at = COALESCE(confirmed_at, ?)
-     WHERE id = ? AND cancelled_at IS NULL AND used_trade_id IS NULL
-       AND NOT EXISTS (SELECT 1 FROM entry_days WHERE account_id = ? AND date = ? AND sit_out_at IS NOT NULL)`,
-  ).bind(new Date(now).toISOString(), plan.id, plan.account_id, plan.date).run();
-  return context.json(await entryState(context.env, plan.account_id));
 });
 
 entryGateRoutes.post("/entry-gate/plans/:id/cancel", async (context) => {
@@ -106,22 +90,15 @@ entryGateRoutes.post("/entry-gate/plans/:id/cancel", async (context) => {
 
 entryGateRoutes.post("/entry-gate/sit-out", async (context) => {
   const body = await context.req.json<{ account_id: string; reason: string }>();
-  if (typeof body.reason !== "string" || body.reason.trim().length < 12 || body.reason.length > 1000) throw new Error("Write why you are finishing for today (12-1000 characters).");
+  if (typeof body.reason !== "string" || body.reason.trim().length < 3 || body.reason.length > 1000) throw new Error("Say why you are done for today (3-1000 characters).");
   const state = await entryState(context.env, body.account_id);
-  if (state.open_count) throw new Error("Manage the existing open position before finishing for today.");
   await context.env.DB.batch([
-    context.env.DB.prepare(
-      `UPDATE entry_days SET sit_out_reason = ?, sit_out_at = ? WHERE account_id = ? AND date = ? AND sit_out_at IS NULL
-       AND NOT EXISTS (SELECT 1 FROM trades WHERE COALESCE(account_id, 'acc-legacy') = ? AND status = 'open' AND deleted = 0)`,
-    ).bind(body.reason.trim(), new Date().toISOString(), state.account_id, state.date, state.account_id),
-    context.env.DB.prepare(
-      `UPDATE entry_plans SET cancelled_at = ? WHERE account_id = ? AND date = ? AND used_trade_id IS NULL AND cancelled_at IS NULL
-       AND EXISTS (SELECT 1 FROM entry_days WHERE account_id = ? AND date = ? AND sit_out_at IS NOT NULL)`,
-    ).bind(new Date().toISOString(), state.account_id, state.date, state.account_id, state.date),
+    context.env.DB.prepare("UPDATE entry_days SET sit_out_reason = ?, sit_out_at = ? WHERE account_id = ? AND date = ? AND sit_out_at IS NULL")
+      .bind(body.reason.trim(), new Date().toISOString(), state.account_id, state.date),
+    context.env.DB.prepare("UPDATE entry_plans SET cancelled_at = ? WHERE account_id = ? AND date = ? AND used_trade_id IS NULL AND cancelled_at IS NULL")
+      .bind(new Date().toISOString(), state.account_id, state.date),
   ]);
-  const updated = await entryState(context.env, state.account_id);
-  if (!updated.sit_out) throw new Error("A position was opened while you were finishing. Review the journal.");
-  return context.json(updated);
+  return context.json(await entryState(context.env, state.account_id));
 });
 
 export async function guardTradeWrites(env: Env, trades: Record<string, unknown>[]) {
@@ -153,7 +130,7 @@ export async function guardTradeWrites(env: Env, trades: Record<string, unknown>
     let planId: string | null = null;
     if (trade.entry_mode === "unplanned") {
       const reason = typeof trade.unplanned_reason === "string" ? trade.unplanned_reason.trim() : "";
-      if (reason.length < 12 || reason.length > 2000) throw new Error("Record what happened without a pre-entry plan (at least 12 characters).");
+      if (reason.length < 3 || reason.length > 2000) throw new Error("Say what happened before this unplanned entry (at least 3 characters).");
       const opened = Date.parse(String(trade.opened_at));
       if (!Number.isFinite(opened) || opened > now) throw new Error("Enter the actual entry time, not a future time.");
       date = tradingDate(state.timezone, opened);
@@ -163,22 +140,30 @@ export async function guardTradeWrites(env: Env, trades: Record<string, unknown>
       trade.plan_setup = null;
       trade.plan_entry = null;
     } else {
-      const blocked = planBlock(state, now, true);
+      const blocked = planBlock(state, now);
       if (blocked) throw new Error(blocked);
       const plan = state.plan!;
-      if (trade.entry_plan_id !== plan.id) throw new Error("A valid confirmed pre-entry plan is required.");
+      if (trade.entry_plan_id !== plan.id) throw new Error("Write the plan first, then log the entry.");
       if (plannedAccounts.has(accountId)) throw new Error("Only one new planned entry per account is allowed in a request.");
       plannedAccounts.add(accountId);
-      if (trade.direction !== plan.details.direction || trade.instrument !== "XAUUSD") throw new Error("Entry direction and instrument must match the locked plan.");
-      if (trade.status !== "open") throw new Error("Already-finished trades must use the unplanned-entry record.");
+      if (trade.direction !== plan.details.direction || trade.instrument !== "XAUUSD") throw new Error("Entry direction and instrument must match the plan.");
       planId = plan.id;
       trade.entry_mode = "planned";
       trade.unplanned_reason = null;
-      trade.opened_at = new Date(now).toISOString();
-      trade.closed_at = null;
-      trade.setup_type = ENTRY_SETUPS.find((setup) => setup.id === plan.details.setup)!.label;
+      // The entry can only have happened after the plan was written and before now.
+      const planned = Date.parse(plan.created_at);
+      const claimed = Date.parse(String(trade.opened_at));
+      trade.opened_at = new Date(Number.isFinite(claimed) ? Math.min(now, Math.max(planned, claimed)) : now).toISOString();
+      if (trade.status !== "closed") trade.closed_at = null;
+      const label = ENTRY_SETUPS.find((setup) => setup.id === plan.details.setup)!.label;
+      trade.setup_type = label;
       trade.plan_setup = `${plan.details.bias.toUpperCase()}: ${plan.details.thesis}`;
-      trade.plan_entry = `${ENTRY_SETUPS.find((setup) => setup.id === plan.details.setup)!.label}\n${plan.details.conditions.join("\n")}\nInvalidation: ${plan.details.invalidation_price} - ${plan.details.invalidation_rule}\nWalk away: ${plan.details.no_trade_if}`;
+      trade.plan_entry = [
+        label, ...plan.details.conditions,
+        `Invalidation: ${plan.details.invalidation_price}${plan.details.invalidation_rule ? ` - ${plan.details.invalidation_rule}` : ""}`,
+        plan.details.alert_price ? `Alert: ${plan.details.alert_price}` : "",
+        plan.details.no_trade_if ? `Walk away: ${plan.details.no_trade_if}` : "",
+      ].filter(Boolean).join("\n");
     }
     claims.push(env.DB.prepare(
       "INSERT INTO entry_ledger (trade_id,account_id,date,entry_plan_id,entry_mode,unplanned_reason,created_at) VALUES (?,?,?,?,?,?,?)",

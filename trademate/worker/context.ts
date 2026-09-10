@@ -213,7 +213,7 @@ export async function traderContext(env: Env): Promise<string> {
     if (day?.sit_out_at) parts.push(`${day.entries === 0 && todayCount === 0 ? "EXPLICIT NO-TRADE DISCIPLINE WIN" : "Finished for today, not a zero-trade win"}: "${day.sit_out_reason}" at ${day.sit_out_at}. No more entries on this account today; do not suggest overriding the lock.`);
     if (locked) {
       const details = JSON.parse(locked.details) as EntryPlanInput;
-      parts.push(`LOCKED PRE-ENTRY PLAN at ${locked.created_at}, wait ends ${locked.ready_at}, confirmations ${locked.confirmed_at ?? "not yet attested"}. Bias ${details.bias}, direction ${details.direction}; ${details.thesis}; must see ${details.conditions.join("; ")}; invalidation ${details.invalidation_price}: ${details.invalidation_rule}; walk away if ${details.no_trade_if}. This snapshot overrides editable day-plan notes for this entry.`);
+      parts.push(`PLAN WRITTEN BEFORE ENTRY at ${locked.created_at} (not yet used). Bias ${details.bias}, direction ${details.direction}; ${details.thesis}; must see ${details.conditions.join("; ")}; invalidation ${details.invalidation_price}${details.invalidation_rule ? `: ${details.invalidation_rule}` : ""}${details.no_trade_if ? `; walks away if ${details.no_trade_if}` : ""}. This snapshot overrides editable day-plan notes for this entry.`);
     }
     if (parts.length) gateLine = parts.join("\n");
   } catch {
@@ -291,7 +291,7 @@ Judge TODAY strictly from this account's section. Never attribute another accoun
 
 HIS CURRENT CONTRACT (LIVE — the numbers come from his profile and OVERRIDE any older version you remember):
 1. The account's job is REPS, not compounding. Success = rule-compliant trades; balance is irrelevant.
-2. Lock bias, setup, three specific confirmations, price alert, invalidation and walk-away criteria BEFORE entry. Wait at least 15 minutes, then attest that all three conditions and required candle closes occurred; the entry window lasts five minutes. Cancel and restart for a changed or expired plan. No trade is owed to the market. Place broker protection as required by the trading plan; TradeMate does not place broker orders.
+2. Plan BEFORE entry, every time: bias, direction (must not contradict the bias), playbook setup, the three things he must see, and the invalidation price are written and saved before the order. No plan, no trade. An entry logged without a prior plan is a rule break even if it wins. No trade is owed to the market. Place broker protection as required by the trading plan; TradeMate does not place broker orders.
 3. MAX ${profile.max_trades_per_day} trade(s) per day — this number is his CURRENT rule.${Number(profile.max_trades_per_day) === 1 ? " One loss = done for the day." : ""}
 4. SL moves to break-even ONLY after a new structure point confirms beyond entry on a 15-MINUTE CLOSE — never from fear, never on a wick.
 5. Red-flag sentences — call them out the moment you hear them: "one last $10", "one more try", "I'll win it back", or wanting to deposit right after a blowup. That is Autopilot talking, not him.`;

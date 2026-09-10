@@ -16,7 +16,8 @@ export function useEntryGate() {
     window.addEventListener("focus", onOnline);
     window.addEventListener("online", onOnline);
     document.addEventListener("visibilitychange", onVisible);
-    const timer = window.setInterval(() => setElapsed(performance.now()), 1000);
+    // Only the day-rollover check depends on time now, so a slow tick is enough.
+    const timer = window.setInterval(() => setElapsed(performance.now()), 30_000);
     return () => {
       clearInterval(timer);
       window.removeEventListener("focus", onOnline);
