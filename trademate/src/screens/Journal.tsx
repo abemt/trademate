@@ -237,7 +237,7 @@ export function Journal() {
   }
 
   return (
-    <div className="mx-auto space-y-5 lg:mx-0 lg:max-w-3xl">
+    <div className="mx-auto space-y-5 lg:max-w-3xl">
       <div className="flex items-center justify-between px-1">
         <div>
           <h1 className="text-2xl font-bold text-white">Journal</h1>

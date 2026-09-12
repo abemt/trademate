@@ -93,6 +93,7 @@ export function Mate() {
   const today = localDateKey(new Date().toISOString());
   const [viewingDay, setViewingDay] = useState(today);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
   const recRef = useRef<SpeechRecognitionLike | null>(null);
   const nextId = useRef(-1);
 
@@ -120,8 +121,8 @@ export function Mate() {
   );
 
   useEffect(() => {
-    // The composer is sticky, so scroll the document end (not a sentinel) to reveal the last message above it.
-    window.scrollTo({ top: document.documentElement.scrollHeight });
+    const list = listRef.current;
+    if (list) list.scrollTop = list.scrollHeight;
   }, [visible, busy]);
 
   function speak(text: string) {
@@ -197,8 +198,8 @@ export function Mate() {
   const hasSR = getSpeechRecognition() !== null;
 
   return (
-    <div className="mx-auto flex w-full flex-col lg:mx-0 lg:max-w-3xl">
-      <div className="flex items-start justify-between px-1">
+    <div className="mx-auto flex min-h-0 w-full flex-1 flex-col lg:max-w-3xl">
+      <div className="flex shrink-0 items-start justify-between px-1">
         <div>
           <h1 className="text-2xl font-bold text-white">Mate</h1>
           <p className="mt-1 text-sm text-ink-300">
@@ -216,7 +217,7 @@ export function Mate() {
       </div>
 
       {viewingDay !== today && (
-        <div className="mt-3 flex items-center justify-between rounded-xl border border-gold-500/30 bg-gold-500/10 px-3.5 py-2.5">
+        <div className="mt-3 flex shrink-0 items-center justify-between rounded-xl border border-gold-500/30 bg-gold-500/10 px-3.5 py-2.5">
           <p className="text-xs font-semibold text-gold-300">
             Viewing {dayLabel(viewingDay)} — read only
           </p>
@@ -230,7 +231,7 @@ export function Mate() {
         </div>
       )}
 
-      <div className="mt-4 space-y-3">
+      <div ref={listRef} className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pb-2 pr-1 [scrollbar-width:thin]">
         {visible.length === 0 && !busy && viewingDay === today && (
           <div className="max-w-[85%] rounded-2xl rounded-tl-sm border border-white/5 bg-ink-800 px-4 py-3 text-sm leading-relaxed text-ink-200">
             Hey {name}. I can see your journal, your rules and your Alpha Capital limits — so
@@ -298,7 +299,7 @@ export function Mate() {
         )}
       </Sheet>
 
-      <div className="sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 mt-4 rounded-2xl border border-white/10 bg-ink-950/90 shadow-[var(--card-shadow)] backdrop-blur-xl lg:bottom-4">
+      <div className="mt-3 shrink-0 rounded-2xl border border-white/10 bg-ink-900/90 shadow-[var(--card-shadow)]">
         <div className="flex items-center gap-2 px-3 py-2.5">
           <button
             type="button"

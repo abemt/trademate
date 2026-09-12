@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { IconGear, IconMoon, IconSun } from "./components/Icons";
 import { PasscodeGate } from "./components/PasscodeGate";
 import { SettingsSheet } from "./components/SettingsSheet";
@@ -26,8 +26,8 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
   }
 
   return (
-    <header className="sticky top-0 z-20 border-b border-white/5 bg-ink-950/85 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
-      <div className="mx-auto flex max-w-lg items-center gap-2.5 px-4 py-3 lg:mx-0 lg:max-w-none lg:px-8">
+    <header className="z-20 shrink-0 border-b border-white/5 bg-ink-950/85 px-4 pt-[env(safe-area-inset-top)] backdrop-blur-xl lg:px-8">
+      <div className="mx-auto flex max-w-lg items-center gap-2.5 py-3 lg:max-w-[1440px]">
         <img src="/icon.svg" alt="" className="h-7 w-7 rounded-lg lg:hidden" />
         <p className="text-base font-bold text-white lg:hidden">
           Trade<span className="text-gold-500">Mate</span>
@@ -63,13 +63,23 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
 function Shell() {
   const tab = useApp((s) => s.tab);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const mainRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    mainRef.current?.scrollTo({ top: 0 });
+  }, [tab]);
+  const chat = tab === "mate";
   return (
     <div className="lg:pl-56">
-      <div className="mx-auto min-h-dvh max-w-lg lg:mx-0 lg:max-w-[1440px]">
+      <div className="flex h-dvh flex-col">
         <Header onOpenSettings={() => setSettingsOpen(true)} />
         <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-        <main className="px-4 pb-28 pt-4 lg:px-8 lg:pb-10">
-          <div key={tab} className="animate-enter">
+        <main
+          ref={mainRef}
+          className={`flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pt-4 lg:px-8 ${
+            chat ? "pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-4" : "pb-28 lg:pb-10"
+          }`}
+        >
+          <div key={tab} className={`animate-enter mx-auto w-full max-w-lg lg:max-w-[1440px] ${chat ? "flex min-h-0 flex-1 flex-col" : ""}`}>
             {tab === "today" ? (
               <Today />
             ) : tab === "journal" ? (

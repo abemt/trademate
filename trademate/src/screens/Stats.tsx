@@ -547,7 +547,7 @@ function MonthCalendar({ trades, maxPerDay }: { trades: Trade[]; maxPerDay: numb
                     disabled={!agg}
                     onClick={() => setSelected(k)}
                     style={bg ? { backgroundColor: bg } : undefined}
-                    className={`relative flex min-h-14 flex-col items-center justify-center rounded-xl text-xs font-semibold transition sm:min-h-20 sm:text-sm ${
+                    className={`relative flex min-h-14 flex-col items-center justify-center rounded-xl text-xs font-semibold transition sm:min-h-20 sm:text-sm lg:min-h-24 ${
                       agg ? "text-white hover:scale-[1.03]" : "text-ink-600"
                     } ${!bg && agg ? "bg-ink-800" : ""} ${!agg ? "bg-ink-900/40" : ""} ${
                       over ? "ring-1 ring-down" : ""
@@ -571,7 +571,7 @@ function MonthCalendar({ trades, maxPerDay }: { trades: Trade[]; maxPerDay: numb
                   </button>
                 );
               })}
-              <div className="hidden min-h-20 flex-col items-center justify-center rounded-xl border border-gold-500/20 bg-gold-500/5 sm:flex">
+              <div className="hidden min-h-20 flex-col items-center justify-center rounded-xl border border-gold-500/20 bg-gold-500/5 sm:flex lg:min-h-24">
                 {wkClosed > 0 ? (
                   <>
                     <span className={`text-sm font-bold ${wkPnl > 0 ? "text-up" : wkPnl < 0 ? "text-down" : "text-ink-300"}`}>
@@ -1082,10 +1082,10 @@ export function Stats() {
         <StatCard label="Open now" value={String(s.openCount)} />
       </div>
 
-      <div className="space-y-4 lg:grid lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:items-start lg:gap-4 lg:space-y-0">
-      <div className="space-y-4">
       <MonthCalendar trades={trades} maxPerDay={maxPerDay} />
 
+      <div className="space-y-4 lg:grid lg:grid-cols-2 lg:items-start lg:gap-4 lg:space-y-0">
+      <div className="space-y-4">
       <Card title="Equity curve" icon={<IconTrendUp />} badge="cumulative $">
         {s.equity.length > 2 ? (
           <EquityCurve points={s.equity} />
