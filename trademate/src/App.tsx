@@ -27,7 +27,7 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
 
   return (
     <header className="sticky top-0 z-20 border-b border-white/5 bg-ink-950/85 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
-      <div className="mx-auto flex max-w-lg items-center gap-2.5 px-4 py-3 lg:max-w-6xl">
+      <div className="mx-auto flex max-w-lg items-center gap-2.5 px-4 py-3 lg:mx-0 lg:max-w-none lg:px-8">
         <img src="/icon.svg" alt="" className="h-7 w-7 rounded-lg lg:hidden" />
         <p className="text-base font-bold text-white lg:hidden">
           Trade<span className="text-gold-500">Mate</span>
@@ -65,10 +65,10 @@ function Shell() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   return (
     <div className="lg:pl-56">
-      <div className="mx-auto min-h-dvh max-w-lg lg:max-w-6xl">
+      <div className="mx-auto min-h-dvh max-w-lg lg:mx-0 lg:max-w-[1440px]">
         <Header onOpenSettings={() => setSettingsOpen(true)} />
         <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-        <main className="px-4 pb-28 pt-4 lg:pb-10">
+        <main className="px-4 pb-28 pt-4 lg:px-8 lg:pb-10">
           <div key={tab} className="animate-enter">
             {tab === "today" ? (
               <Today />

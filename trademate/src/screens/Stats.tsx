@@ -547,7 +547,7 @@ function MonthCalendar({ trades, maxPerDay }: { trades: Trade[]; maxPerDay: numb
                     disabled={!agg}
                     onClick={() => setSelected(k)}
                     style={bg ? { backgroundColor: bg } : undefined}
-                    className={`relative flex min-h-14 flex-col items-center justify-center rounded-xl text-xs font-semibold transition sm:min-h-20 sm:text-sm lg:min-h-24 ${
+                    className={`relative flex min-h-14 flex-col items-center justify-center rounded-xl text-xs font-semibold transition sm:min-h-20 sm:text-sm ${
                       agg ? "text-white hover:scale-[1.03]" : "text-ink-600"
                     } ${!bg && agg ? "bg-ink-800" : ""} ${!agg ? "bg-ink-900/40" : ""} ${
                       over ? "ring-1 ring-down" : ""
@@ -571,7 +571,7 @@ function MonthCalendar({ trades, maxPerDay }: { trades: Trade[]; maxPerDay: numb
                   </button>
                 );
               })}
-              <div className="hidden min-h-20 flex-col items-center justify-center rounded-xl border border-gold-500/20 bg-gold-500/5 sm:flex lg:min-h-24">
+              <div className="hidden min-h-20 flex-col items-center justify-center rounded-xl border border-gold-500/20 bg-gold-500/5 sm:flex">
                 {wkClosed > 0 ? (
                   <>
                     <span className={`text-sm font-bold ${wkPnl > 0 ? "text-up" : wkPnl < 0 ? "text-down" : "text-ink-300"}`}>
@@ -1062,10 +1062,7 @@ export function Stats() {
         </p>
       </div>
 
-      <MonthCalendar trades={trades} maxPerDay={maxPerDay} />
-
-      <div className="space-y-4 lg:columns-2 lg:gap-4 lg:space-y-0 lg:[&>*]:mb-4 lg:[&>*]:break-inside-avoid">
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-3 gap-2 lg:grid-cols-6">
         <StatCard
           label="Net P&L"
           value={fmtUsd(s.netUsd)}
@@ -1085,17 +1082,9 @@ export function Stats() {
         <StatCard label="Open now" value={String(s.openCount)} />
       </div>
 
-      <DisciplineTriangle trades={trades} maxPerDay={maxPerDay} />
-
-      <NervousSystemCard trades={trades} />
-
-      <MistakesCostCard trades={trades} />
-
-      <PlanPerformanceCard trades={trades} />
-
-      <MonthlyProgress trades={trades} />
-
-      <WeeklyReviewCard />
+      <div className="space-y-4 lg:grid lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:items-start lg:gap-4 lg:space-y-0">
+      <div className="space-y-4">
+      <MonthCalendar trades={trades} maxPerDay={maxPerDay} />
 
       <Card title="Equity curve" icon={<IconTrendUp />} badge="cumulative $">
         {s.equity.length > 2 ? (
@@ -1104,6 +1093,20 @@ export function Stats() {
           <p className="text-sm text-ink-300">A couple more closed trades and the curve appears.</p>
         )}
       </Card>
+
+      <MonthlyProgress trades={trades} />
+
+      <WeeklyReviewCard />
+      </div>
+
+      <div className="space-y-4">
+      <DisciplineTriangle trades={trades} maxPerDay={maxPerDay} />
+
+      <NervousSystemCard trades={trades} />
+
+      <MistakesCostCard trades={trades} />
+
+      <PlanPerformanceCard trades={trades} />
 
       <Card title="Discipline" icon={<IconGauge />}>
         <ul className="space-y-2 text-sm">
@@ -1158,6 +1161,7 @@ export function Stats() {
           </div>
         </Card>
       )}
+      </div>
       </div>
     </div>
   );

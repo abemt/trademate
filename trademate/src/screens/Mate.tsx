@@ -93,7 +93,6 @@ export function Mate() {
   const today = localDateKey(new Date().toISOString());
   const [viewingDay, setViewingDay] = useState(today);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
   const recRef = useRef<SpeechRecognitionLike | null>(null);
   const nextId = useRef(-1);
 
@@ -121,7 +120,8 @@ export function Mate() {
   );
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" });
+    // The composer is sticky, so scroll the document end (not a sentinel) to reveal the last message above it.
+    window.scrollTo({ top: document.documentElement.scrollHeight });
   }, [visible, busy]);
 
   function speak(text: string) {
@@ -197,7 +197,7 @@ export function Mate() {
   const hasSR = getSpeechRecognition() !== null;
 
   return (
-    <div className="mx-auto flex w-full flex-col lg:max-w-3xl">
+    <div className="mx-auto flex w-full flex-col lg:mx-0 lg:max-w-3xl">
       <div className="flex items-start justify-between px-1">
         <div>
           <h1 className="text-2xl font-bold text-white">Mate</h1>
@@ -230,7 +230,7 @@ export function Mate() {
         </div>
       )}
 
-      <div className="mt-4 space-y-3 pb-24">
+      <div className="mt-4 space-y-3">
         {visible.length === 0 && !busy && viewingDay === today && (
           <div className="max-w-[85%] rounded-2xl rounded-tl-sm border border-white/5 bg-ink-800 px-4 py-3 text-sm leading-relaxed text-ink-200">
             Hey {name}. I can see your journal, your rules and your Alpha Capital limits — so
@@ -261,7 +261,6 @@ export function Mate() {
             ))}
           </div>
         )}
-        <div ref={bottomRef} />
       </div>
 
       <Sheet open={historyOpen} onClose={() => setHistoryOpen(false)} title="Chat history">
@@ -299,8 +298,8 @@ export function Mate() {
         )}
       </Sheet>
 
-      <div className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-10 border-t border-white/5 bg-ink-950/90 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-lg items-center gap-2 px-4 py-2.5 lg:max-w-3xl">
+      <div className="sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 mt-4 rounded-2xl border border-white/10 bg-ink-950/90 shadow-[var(--card-shadow)] backdrop-blur-xl lg:bottom-4">
+        <div className="flex items-center gap-2 px-3 py-2.5">
           <button
             type="button"
             onClick={() => setSpeakBack((v) => !v)}

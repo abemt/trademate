@@ -92,12 +92,12 @@ h2 {
   background: rgb(139 92 246 / 0.25);
 }
 
-/* Fail-open enter transition: if animation frames are throttled (backgrounded
-   PWA, headless), content simply shows in its natural, fully-visible state. */
+/* Fail-open enter transition: opacity only. A transform here would make the
+   animated wrapper the containing block for fixed/sticky children (chat
+   composer) whenever frames stall, so the slide is deliberately omitted. */
 @keyframes enter {
   from {
     opacity: 0;
-    transform: translateY(8px);
   }
 }
 
