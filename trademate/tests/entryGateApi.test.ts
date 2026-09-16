@@ -78,6 +78,23 @@ test("sit-out locks the day, cancels the live plan, and counts as a win only wit
   assert.equal((await entryState(env, "acc-legacy")).sit_out, null, "other accounts unaffected");
 });
 
+test("a trade taken after banking the day can still be logged honestly, and it revokes the win", async () => {
+  const { db, env, request } = fixture();
+  db.exec("UPDATE accounts SET active = CASE WHEN id = 'gate-test' THEN 1 ELSE 0 END");
+  await request("/entry-gate/sit-out", { account_id: "gate-test", reason: "FOMC day, protecting capital" });
+  assert.match(await traderContext(env), /EXPLICIT NO-TRADE DISCIPLINE WIN/);
+  const broken = await guardTradeWrites(env, [{ id: "after-lock", account_id: "gate-test", direction: "short", instrument: "XAUUSD", status: "open", entry_mode: "unplanned", unplanned_reason: "A+ double top at my POI, took it after banking the day", opened_at: new Date(Date.now() - 60_000).toISOString() }]);
+  await env.DB.batch(broken.claims);
+  assert.equal(broken.trades[0].followed_plan, 0);
+  const state = await entryState(env, "gate-test");
+  assert.ok(state.sit_out, "the lock stays");
+  assert.equal(state.trade_count, 1);
+  assert.equal(state.sit_out_days?.[0].entries, 1, "no-trade win revoked");
+  const context = await traderContext(env);
+  assert.match(context, /SIT-OUT BROKEN[^\n]*1 entry after the lock/);
+  assert.doesNotMatch(context, /EXPLICIT NO-TRADE DISCIPLINE WIN/);
+});
+
 test("authenticated trade endpoint: no plan → 409, legacy trades still close, deletes keep the count", async () => {
   const { db, env } = fixture();
   env.JWT_SECRET = "local-test-only-signing-key-not-a-real-credential";

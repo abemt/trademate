@@ -186,8 +186,12 @@ export function EntryGate({ onReady, onUnplanned }: { onReady: (state: EntryGate
           } catch (failure) { setError(failure instanceof Error ? failure.message : "Check your plan."); }
         }} />
       )}
-      {onUnplanned && !state?.sit_out && (
-        <button type="button" className="text-left text-xs text-ink-400 underline decoration-ink-600 underline-offset-4 hover:text-down" disabled={busy} onClick={onUnplanned}>Already in a trade without a plan? Log it as a rule break</button>
+      {onUnplanned && (
+        <button type="button" className="text-left text-xs text-ink-400 underline decoration-ink-600 underline-offset-4 hover:text-down" disabled={busy} onClick={onUnplanned}>
+          {state?.sit_out
+            ? "Banked the day but traded anyway? Log it honestly as a rule break — the lock stays, the record matters more."
+            : "Already in a trade without a plan? Log it as a rule break"}
+        </button>
       )}
     </section>
   );

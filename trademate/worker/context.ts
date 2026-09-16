@@ -220,14 +220,20 @@ export async function traderContext(env: Env): Promise<string> {
   try {
     const day = await env.DB.prepare(
       `SELECT sit_out_reason, sit_out_at, max_trades,
-       legacy_count + (SELECT COUNT(*) FROM entry_ledger WHERE account_id = entry_days.account_id AND date = entry_days.date) AS entries
+       legacy_count + (SELECT COUNT(*) FROM entry_ledger WHERE account_id = entry_days.account_id AND date = entry_days.date) AS entries,
+       (SELECT COUNT(*) FROM entry_ledger WHERE account_id = entry_days.account_id AND date = entry_days.date AND entry_days.sit_out_at IS NOT NULL AND created_at > entry_days.sit_out_at) AS after_lock
        FROM entry_days WHERE account_id = ? AND date = ?`,
-    ).bind(account.id, today).first<{ sit_out_reason: string | null; sit_out_at: string | null; max_trades: number; entries: number }>();
+    ).bind(account.id, today).first<{ sit_out_reason: string | null; sit_out_at: string | null; max_trades: number; entries: number; after_lock: number }>();
     const locked = await env.DB.prepare("SELECT details, created_at, ready_at, confirmed_at FROM entry_plans WHERE account_id = ? AND date = ? AND cancelled_at IS NULL AND used_trade_id IS NULL ORDER BY created_at DESC LIMIT 1")
       .bind(account.id, today).first<{ details: string; created_at: string; ready_at: string; confirmed_at: string | null }>();
     const parts: string[] = [];
     if (day) parts.push(`Entry gate: ${day.entries}/${day.max_trades} entries (including deleted journal records); the day limit cannot be increased mid-session.`);
-    if (day?.sit_out_at) parts.push(`${day.entries === 0 && todayCount === 0 ? "EXPLICIT NO-TRADE DISCIPLINE WIN" : "Finished for today, not a zero-trade win"}: "${day.sit_out_reason}" at ${day.sit_out_at}. No more entries on this account today; do not suggest overriding the lock.`);
+    if (day?.sit_out_at) {
+      const status = day.after_lock > 0
+        ? `SIT-OUT BROKEN: he banked a no-trade day and then recorded ${day.after_lock} entr${day.after_lock === 1 ? "y" : "ies"} after the lock. That is a rule break regardless of the result — name it plainly, credit him for logging it honestly, and do not call today a discipline win`
+        : day.entries === 0 && todayCount === 0 ? "EXPLICIT NO-TRADE DISCIPLINE WIN" : "Finished for today after trading, not a zero-trade win";
+      parts.push(`${status}: "${day.sit_out_reason}" at ${day.sit_out_at}. No more entries on this account today; do not suggest overriding the lock.`);
+    }
     if (locked) {
       const details = JSON.parse(locked.details) as EntryPlanInput;
       parts.push(`PLAN WRITTEN BEFORE ENTRY at ${locked.created_at} (not yet used). Bias ${details.bias}, direction ${details.direction}; ${details.thesis}; must see ${details.conditions.join("; ")}; invalidation ${details.invalidation_price}${details.invalidation_rule ? `: ${details.invalidation_rule}` : ""}${details.no_trade_if ? `; walks away if ${details.no_trade_if}` : ""}. This snapshot overrides editable day-plan notes for this entry.`);
