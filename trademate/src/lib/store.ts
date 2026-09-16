@@ -3,8 +3,26 @@ import { api } from "./api";
 import { createTrade, fetchMergedTrades, flushQueue, queueUpsert } from "./sync";
 import type { Account, Trade } from "./trades";
 import type { EntryGateState } from "../../shared/entryGate";
+import type { UrgeEntry, UrgeOutcome } from "../../shared/urges";
 
 let gateRequest = 0;
+const URGE_QUEUE_KEY = "tm_urge_queue_v1";
+
+function readUrgeQueue(): UrgeEntry[] {
+  try {
+    return JSON.parse(localStorage.getItem(URGE_QUEUE_KEY) ?? "[]") as UrgeEntry[];
+  } catch {
+    return [];
+  }
+}
+
+function writeUrgeQueue(entries: UrgeEntry[]): void {
+  try {
+    localStorage.setItem(URGE_QUEUE_KEY, JSON.stringify(entries));
+  } catch {
+    // storage full or unavailable — the in-memory list still shows the entry
+  }
+}
 
 export interface Profile {
   id: number;
@@ -52,6 +70,12 @@ interface AppState {
   entryGateReceivedAt: number;
   loadEntryGate: () => Promise<void>;
   acceptEntryGate: (state: EntryGateState) => void;
+  urges: UrgeEntry[];
+  urgeSheetOpen: boolean;
+  setUrgeSheetOpen: (open: boolean) => void;
+  loadUrges: () => Promise<void>;
+  logUrge: (entry: UrgeEntry) => Promise<void>;
+  setUrgeOutcome: (id: string, outcome: UrgeOutcome, instead?: string) => Promise<void>;
   setTab: (tab: Tab) => void;
   setLogFormOpen: (open: boolean) => void;
   setPrefill: (prefill: Partial<Trade> | null) => void;
@@ -79,6 +103,56 @@ export const useApp = create<AppState>((set, get) => ({
   entryGateError: null,
   entryGateLoading: false,
   entryGateReceivedAt: 0,
+  urges: [],
+  urgeSheetOpen: false,
+
+  setUrgeSheetOpen: (urgeSheetOpen) => set({ urgeSheetOpen }),
+
+  loadUrges: async () => {
+    // Flush captures made offline first so the server list already contains them.
+    const queued = readUrgeQueue();
+    const remaining: UrgeEntry[] = [];
+    for (const entry of queued) {
+      try {
+        await api("/urges", { method: "PUT", body: JSON.stringify(entry) });
+      } catch {
+        remaining.push(entry);
+      }
+    }
+    writeUrgeQueue(remaining);
+    try {
+      const r = await api<{ urges: UrgeEntry[] }>("/urges?days=90");
+      const ids = new Set(r.urges.map((entry) => entry.id));
+      set({ urges: [...remaining.filter((entry) => !ids.has(entry.id)), ...r.urges] });
+    } catch {
+      if (remaining.length) set((s) => ({ urges: [...remaining, ...s.urges.filter((entry) => !remaining.some((q) => q.id === entry.id))] }));
+    }
+  },
+
+  logUrge: async (entry) => {
+    set((s) => ({ urges: [entry, ...s.urges.filter((existing) => existing.id !== entry.id)] }));
+    try {
+      const r = await api<{ urge: UrgeEntry }>("/urges", { method: "PUT", body: JSON.stringify(entry) });
+      set((s) => ({ urges: s.urges.map((existing) => (existing.id === entry.id ? r.urge : existing)) }));
+    } catch {
+      writeUrgeQueue([...readUrgeQueue().filter((queued) => queued.id !== entry.id), entry]);
+    }
+  },
+
+  setUrgeOutcome: async (id, outcome, instead) => {
+    const now = new Date().toISOString();
+    set((s) => ({ urges: s.urges.map((entry) => (entry.id === id ? { ...entry, outcome, instead: instead ?? entry.instead, updated_at: now } : entry)) }));
+    const entry = get().urges.find((candidate) => candidate.id === id);
+    if (readUrgeQueue().some((queued) => queued.id === id) && entry) {
+      writeUrgeQueue(readUrgeQueue().map((queued) => (queued.id === id ? entry : queued)));
+      return;
+    }
+    try {
+      await api(`/urges/${id}`, { method: "PATCH", body: JSON.stringify({ outcome, instead }) });
+    } catch {
+      if (entry) writeUrgeQueue([...readUrgeQueue(), entry]);
+    }
+  },
 
   acceptEntryGate: (state) => {
     const account = get().accounts.find((candidate) => candidate.active === 1 && candidate.archived === 0);
@@ -114,6 +188,7 @@ export const useApp = create<AppState>((set, get) => ({
         void get().loadProfile();
         void get().loadAccounts();
         void get().loadTrades();
+        void get().loadUrges();
       } else {
         set({ auth: "locked" });
       }
@@ -129,6 +204,7 @@ export const useApp = create<AppState>((set, get) => ({
       void get().loadProfile();
       void get().loadAccounts();
       void get().loadTrades();
+      void get().loadUrges();
       return true;
     } catch {
       return false;

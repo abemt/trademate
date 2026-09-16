@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Card } from "../components/Card";
 import { SitOutControl } from "../components/EntryGate";
+import { UrgeLogCard } from "../components/UrgeCatch";
 import { tradingDate } from "../../shared/entryGate";
 import {
   IconClock,
@@ -599,6 +600,7 @@ export function Today() {
           <RoutineCard />
           <CheckinCard />
           <TradeTokens />
+          <UrgeLogCard />
           <SessionClock now={now} />
           <DisciplineCard />
         </div>

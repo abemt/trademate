@@ -158,6 +158,15 @@ export const IconMoon = (p: P) => (
   </Svg>
 );
 
+export const IconHand = (p: P) => (
+  <Svg {...p}>
+    <path d="M8 12V5.5a1.5 1.5 0 0 1 3 0V11" />
+    <path d="M11 10.5V4.5a1.5 1.5 0 0 1 3 0V11" />
+    <path d="M14 10.5V6a1.5 1.5 0 0 1 3 0v7.5" />
+    <path d="M8 12.5v-1a1.5 1.5 0 0 0-3 0V15a7 7 0 0 0 14 0v-1.5" />
+  </Svg>
+);
+
 export const IconSpark = (p: P) => (
   <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" {...p}>
     <path d="M13 2 4.5 14H10l-1 8 8.5-12H12l1-8Z" />

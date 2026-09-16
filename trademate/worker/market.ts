@@ -1,6 +1,6 @@
 /** Market data fetchers + briefing/news/weekly-report generators. All free sources. */
 import { parseAIJson } from "./ai";
-import { askMate, getProfile, localDate, recentTrades, tradeLines, type Env } from "./context";
+import { askMate, getProfile, localDate, recentTrades, tradeLines, urgeLines, type Env } from "./context";
 import { pushAll } from "./push";
 
 // ---------- data sources ----------
@@ -437,10 +437,13 @@ export async function weeklyReport(env: Env, refresh = false): Promise<Record<st
     // no day_plans table
   }
 
+  const urges = await urgeLines(env, 7);
+
   const prompt = [
     `Write my weekly coaching review (week starting ${week}).`,
     `This week's trades:\n${tradeLines(weekTrades)}`,
     `Intentional session decisions for this account:\n${sitOuts || "None recorded. Missing decisions are unknown, not a failure."}`,
+    `${urges}\nTreat every urge he logged and walked away from as a discipline rep won this week; look for the pattern in time of day, area and permission sentence and say it plainly.`,
     dayPlans ? `My written day plans this week (compare planned vs what I actually did — plan adherence is the core of the review):\n${dayPlans}` : "No written day plans this week — mention that writing them is part of the routine.",
     checkins ? `Check-ins:\n${checkins}` : "No check-ins this week.",
     "Weigh plan adherence over P&L: trades matching the written plan (his-plan / waited-for) are wins even when red; trades contradicting the plan are failures even when green. Use my CURRENT rules from the context — not any older limits.",

@@ -920,6 +920,7 @@ export function DisciplineCard() {
   const storedGate = useApp((state) => state.entryGate);
   const gate = storedGate?.account_id === accountId ? storedGate : null;
   const timezone = useApp((state) => state.profile?.timezone) ?? "Africa/Addis_Ababa";
+  const urges = useApp((state) => state.urges);
   const maxPerDay = useApp((s) => s.profile?.max_trades_per_day) ?? 2;
   const [setups, setSetups] = useState<SetupRow[]>([]);
   const [checkins, setCheckins] = useState<Checkin[]>([]);
@@ -955,6 +956,10 @@ export function DisciplineCard() {
     for (const c of checkins) add(c.date, 10);
     const noTradeDays = new Set((gate?.sit_out_days ?? []).filter((day) => day.entries === 0 && !byDay.has(day.date)).map((day) => day.date));
     for (const day of noTradeDays) add(day, 20);
+    for (const u of urges) {
+      if (u.outcome === "resisted") add(tradingDate(timezone, Date.parse(u.created_at)), 10);
+      else if (u.outcome === "acted") add(tradingDate(timezone, Date.parse(u.created_at)), 3);
+    }
 
     let total = 0;
     for (const v of dayXp.values()) total += Math.max(0, v);
@@ -974,7 +979,7 @@ export function DisciplineCard() {
     }
 
     return { xp: total, streak: streakCount, todayXp: Math.max(0, dayXp.get(today) ?? 0) };
-  }, [trades, setups, checkins, maxPerDay, gate, timezone]);
+  }, [trades, setups, checkins, maxPerDay, gate, timezone, urges]);
 
   const level = Math.floor(xp / 100) + 1;
 
@@ -999,7 +1004,8 @@ export function DisciplineCard() {
       </div>
       <p className="mt-2.5 text-xs leading-relaxed text-ink-400">
         XP comes from process only: journaling (+10), following your plan (+20), skipping weak
-        setups (+15), checking in (+10), a committed zero-trade day (+20). Never from profits.
+        setups (+15), checking in (+10), a committed zero-trade day (+20), an urge you caught and
+        walked away from (+10). Never from profits.
       </p>
     </Card>
   );

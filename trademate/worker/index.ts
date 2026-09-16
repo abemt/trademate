@@ -12,6 +12,7 @@ import {
 import { generateBriefing, scanNews, weeklyReport } from "./market";
 import { pushAll } from "./push";
 import { entryGateRoutes, guardTradeWrites } from "./entryGate";
+import { URGE_OUTCOMES, validateUrge, type UrgeOutcome } from "../shared/urges";
 
 const COOKIE = "tm_session";
 const SESSION_DAYS = 30;
@@ -800,6 +801,49 @@ app.post("/checkins", async (c) => {
     )
     .run();
   return c.json({ ok: true, date: today });
+});
+
+// ---------- autopilot catch log ----------
+
+app.get("/urges", async (c) => {
+  const days = Math.min(365, Math.max(1, Number(c.req.query("days")) || 90));
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  const { results } = await c.env.DB.prepare(
+    "SELECT * FROM urge_log WHERE created_at >= ? ORDER BY created_at DESC LIMIT 500",
+  ).bind(since).all();
+  return c.json({ urges: results });
+});
+
+app.put("/urges", async (c) => {
+  const body = await c.req.json<unknown>().catch(() => null);
+  try {
+    const entry = validateUrge(body);
+    const now = new Date().toISOString();
+    // Client-supplied timestamp is kept only when it is a real ISO time in the past (offline capture).
+    const claimed = typeof (body as { created_at?: unknown }).created_at === "string" ? Date.parse((body as { created_at: string }).created_at) : NaN;
+    const created = Number.isFinite(claimed) && claimed <= Date.now() ? new Date(claimed).toISOString() : now;
+    await c.env.DB.prepare(
+      `INSERT INTO urge_log (id,created_at,updated_at,domain,intensity,sentence,feeling,outcome,instead) VALUES (?,?,?,?,?,?,?,?,?)
+       ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at, intensity=excluded.intensity, sentence=excluded.sentence,
+         feeling=excluded.feeling, outcome=excluded.outcome, instead=excluded.instead`,
+    ).bind(entry.id, created, now, entry.domain, entry.intensity, entry.sentence, entry.feeling, entry.outcome, entry.instead).run();
+    const saved = await c.env.DB.prepare("SELECT * FROM urge_log WHERE id = ?").bind(entry.id).first();
+    return c.json({ urge: saved });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Could not save." }, 400);
+  }
+});
+
+app.patch("/urges/:id", async (c) => {
+  const body = await c.req.json<{ outcome?: unknown; instead?: unknown }>().catch(() => null);
+  const outcome = body?.outcome;
+  if (!URGE_OUTCOMES.includes(outcome as UrgeOutcome)) return c.json({ error: "Bad outcome" }, 400);
+  const instead = typeof body?.instead === "string" ? body.instead.trim().slice(0, 500) || null : null;
+  await c.env.DB.prepare("UPDATE urge_log SET outcome = ?, instead = COALESCE(?, instead), updated_at = ? WHERE id = ?")
+    .bind(outcome, instead, new Date().toISOString(), c.req.param("id")).run();
+  const saved = await c.env.DB.prepare("SELECT * FROM urge_log WHERE id = ?").bind(c.req.param("id")).first();
+  if (!saved) return c.json({ error: "Not found" }, 404);
+  return c.json({ urge: saved });
 });
 
 // ---------- weekly coach report ----------

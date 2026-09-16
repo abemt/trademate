@@ -4,6 +4,7 @@ import { PasscodeGate } from "./components/PasscodeGate";
 import { SettingsSheet } from "./components/SettingsSheet";
 import { Splash } from "./components/Splash";
 import { TabBar } from "./components/TabBar";
+import { UrgeCatchButton, UrgeCatchSheet } from "./components/UrgeCatch";
 import { useApp } from "./lib/store";
 import { applyTheme, currentTheme, type Theme } from "./lib/theme";
 import { Analyze } from "./screens/Analyze";
@@ -33,6 +34,8 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
           Trade<span className="text-gold-500">Mate</span>
         </p>
         <div className="ml-auto flex items-center gap-2">
+          <span className="hidden sm:block"><UrgeCatchButton /></span>
+          <span className="sm:hidden"><UrgeCatchButton compact /></span>
           {(active || profile) && (
             <span className="rounded-full border border-gold-500/30 bg-gold-500/8 px-2.5 py-1 text-[10px] font-semibold text-gold-400">
               {active?.label ?? profile?.account_label}
@@ -73,6 +76,7 @@ function Shell() {
       <div className="flex h-dvh flex-col">
         <Header onOpenSettings={() => setSettingsOpen(true)} />
         <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+        <UrgeCatchSheet />
         <main
           ref={mainRef}
           className={`flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pt-4 lg:px-8 ${

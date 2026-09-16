@@ -1,5 +1,6 @@
 import { MATE_PERSONA, callAI, type AIMessage } from "./ai";
 import type { EntryPlanInput } from "../shared/entryGate";
+import { summarizeUrges, type UrgeEntry } from "../shared/urges";
 
 export interface Env {
   DB: D1Database;
@@ -117,6 +118,22 @@ export function tradeLines(trades: TradeRow[]): string {
     return "- " + bits.filter(Boolean).join(" | ");
   });
   return lines.length ? lines.join("\n") : "- none logged yet";
+}
+
+/** Last two weeks of the autopilot catch log, for coaching context. */
+export async function urgeLines(env: Env, days = 14): Promise<string> {
+  try {
+    const since = new Date(Date.now() - days * 86_400_000).toISOString();
+    const { results } = await env.DB.prepare("SELECT * FROM urge_log WHERE created_at >= ? ORDER BY created_at DESC LIMIT 60").bind(since).all<UrgeEntry>();
+    if (!results.length) return `Autopilot catch log (last ${days} days): nothing logged. Absence of entries means he did not log, not that no urges happened.`;
+    const s = summarizeUrges(results);
+    const recent = results.slice(0, 6).map((entry) =>
+      `- ${entry.created_at.slice(0, 16).replace("T", " ")}Z ${entry.domain} urge ${entry.intensity}/5 ${entry.outcome.toUpperCase()}${entry.sentence ? ` said:"${entry.sentence.slice(0, 60)}"` : ""}${entry.feeling ? ` felt:"${entry.feeling.slice(0, 80)}"` : ""}${entry.instead ? ` instead:"${entry.instead.slice(0, 50)}"` : ""}`,
+    );
+    return `Autopilot catch log (last ${days} days): ${s.total} logged — walked away ${s.resisted}, acted ${s.acted}, still open ${s.pending}${s.catchRate !== null ? ` (catch rate ${s.catchRate}%)` : ""}. By area: ${Object.entries(s.byDomain).map(([k, v]) => `${k} ${v}`).join(", ")}.${s.topSentence ? ` Most common permission sentence: "${s.topSentence.text}" (${s.topSentence.count}x).` : ""}\n${recent.join("\n")}`;
+  } catch {
+    return "Autopilot catch log unavailable.";
+  }
 }
 
 export async function traderContext(env: Env): Promise<string> {
@@ -268,6 +285,8 @@ export async function traderContext(env: Env): Promise<string> {
     // zones table may not exist yet
   }
 
+  const urgeBlock = await urgeLines(env);
+
   return `TRADER CONTEXT (live from his journal, newest first)
 Name: ${profile.trader_name} · Timezone: ${tz} · Instrument: ${profile.instrument}
 ACTIVE account: ${account.label} [${account.type}] — started $${startBalance}, live balance $${liveBalance}${otherAccounts ? `\nOther accounts: ${otherAccounts}` : ""}
@@ -278,6 +297,7 @@ Market regime note: ${profile.market_regime_note ?? "n/a"}
 His marked zones: ${zonesLine}
 ${checkinLine}
 Nervous system: ${nervousLine}
+${urgeBlock}
 Recent trades P&L (last ${closed.length} closed): ${recentPnl >= 0 ? "+" : ""}$${Math.round(recentPnl)}
 Recent trades (HISTORY — includes previous days, check each date):
 ${tradeLines(trades)}
@@ -294,7 +314,8 @@ HIS CURRENT CONTRACT (LIVE — the numbers come from his profile and OVERRIDE an
 2. Plan BEFORE entry, every time: bias, direction (must not contradict the bias), playbook setup, the three things he must see, and the invalidation price are written and saved before the order. No plan, no trade. An entry logged without a prior plan is a rule break even if it wins. No trade is owed to the market. Place broker protection as required by the trading plan; TradeMate does not place broker orders.
 3. MAX ${profile.max_trades_per_day} trade(s) per day — this number is his CURRENT rule.${Number(profile.max_trades_per_day) === 1 ? " One loss = done for the day." : ""}
 4. SL moves to break-even ONLY after a new structure point confirms beyond entry on a 15-MINUTE CLOSE — never from fear, never on a wick.
-5. Red-flag sentences — call them out the moment you hear them: "one last $10", "one more try", "I'll win it back", or wanting to deposit right after a blowup. That is Autopilot talking, not him.`;
+5. Red-flag sentences — call them out the moment you hear them: "one last $10", "one more try", "I'll win it back", "one loss won't take me anywhere", "it's basically there" / a "half" setup, or wanting to deposit right after a blowup. That is Autopilot talking, not him.
+6. The loop he is breaking (it shows up in trading, in Rainbow Six and in daily life): cue -> permission sentence -> Autopilot acts -> regret. His job is to NOTICE and log it in the catch log before acting. When he reports an urge, name the loop, point at his own catch count, and tell him to step away for five minutes — the urge peaks and passes. A logged urge he walked away from is a rep won, whatever the market did afterwards.`;
 }
 
 export async function askMate(

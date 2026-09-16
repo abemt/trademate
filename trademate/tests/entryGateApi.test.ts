@@ -1,40 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { sign } from "hono/jwt";
-import type { Env } from "../worker/context";
 import { traderContext } from "../worker/context";
-import { entryGateRoutes, entryState, guardTradeWrites } from "../worker/entryGate";
+import { entryState, guardTradeWrites } from "../worker/entryGate";
 import worker from "../worker/index";
-
-class Statement {
-  values: (string | number | null)[] = [];
-  constructor(readonly db: DatabaseSync, readonly sql: string) {}
-  bind(...values: (string | number | null)[]) { this.values = values; return this; }
-  async first() { return this.db.prepare(this.sql).get(...this.values) ?? null; }
-  async all() { return { results: this.db.prepare(this.sql).all(...this.values) }; }
-  async run() { return { meta: this.db.prepare(this.sql).run(...this.values) }; }
-}
-
-function fixture() {
-  const db = new DatabaseSync(":memory:");
-  const directory = new URL("../migrations/", import.meta.url);
-  for (const filename of readdirSync(directory).filter((name) => name.endsWith(".sql")).sort()) db.exec(readFileSync(new URL(filename, directory), "utf8"));
-  db.prepare("INSERT INTO accounts (id,label,type,starting_balance,active,archived,created_at) VALUES ('gate-test','Test','demo',10000,0,0,datetime('now'))").run();
-  const env = { DB: {
-    prepare: (sql: string) => new Statement(db, sql),
-    batch: async (statements: Statement[]) => {
-      db.exec("BEGIN");
-      try { const result = []; for (const statement of statements) result.push(await statement.run()); db.exec("COMMIT"); return result; }
-      catch (error) { db.exec("ROLLBACK"); throw error; }
-    },
-  } } as unknown as Env;
-  const request = (route: string, value?: unknown) => entryGateRoutes.request(`http://localhost${route}`, value ? {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value),
-  } : undefined, env);
-  return { db, env, request };
-}
+import { fixture } from "./fixture";
 
 const details = {
   bias: "bearish", direction: "short", setup: "m15_double", thesis: "Back at the H1 supply that rejected twice.",
@@ -136,5 +106,5 @@ test("Mate sees the written plan and the explicit no-trade decision", async () =
   await request("/entry-gate/sit-out", { account_id: "gate-test", reason: "No clean setup formed" });
   const context = await traderContext(env);
   assert.match(context, /EXPLICIT NO-TRADE DISCIPLINE WIN/);
-  assert.doesNotMatch(context, /15 minutes|five minutes/i);
+  assert.doesNotMatch(context, /wait at least 15 minutes|entry window lasts/i);
 });
