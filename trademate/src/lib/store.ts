@@ -1,11 +1,12 @@
 import { create } from "zustand";
 import { api } from "./api";
-import { createTrade, fetchMergedTrades, flushQueue, queueUpsert } from "./sync";
+import { cachedTrades, createTrade, fetchMergedTrades, flushQueue, queueUpsert } from "./sync";
 import type { Account, Trade } from "./trades";
 import type { EntryGateState } from "../../shared/entryGate";
 import type { UrgeEntry, UrgeOutcome } from "../../shared/urges";
 
 let gateRequest = 0;
+let gateInFlight: { accountId: string; promise: Promise<void> } | null = null;
 const URGE_QUEUE_KEY = "tm_urge_queue_v1";
 
 function readUrgeQueue(): UrgeEntry[] {
@@ -158,22 +159,31 @@ export const useApp = create<AppState>((set, get) => ({
     const account = get().accounts.find((candidate) => candidate.active === 1 && candidate.archived === 0);
     if (account?.id !== state.account_id) return;
     gateRequest++;
+    gateInFlight = null;
     set({ entryGate: state, entryGateError: null, entryGateLoading: false, entryGateReceivedAt: performance.now() });
   },
 
   loadEntryGate: async () => {
-    const request = ++gateRequest;
     const account = get().accounts.find((candidate) => candidate.active === 1 && candidate.archived === 0);
     if (!account) { set({ entryGate: null, entryGateLoading: false }); return; }
+    // Every gate-aware component refreshes on mount and on window focus; one request serves them all.
+    if (gateInFlight?.accountId === account.id) return gateInFlight.promise;
+    const request = ++gateRequest;
     set({ entryGateLoading: true, entryGateError: null });
-    try {
-      const state = await api<EntryGateState>(`/entry-gate?account_id=${encodeURIComponent(account.id)}`);
-      if (request !== gateRequest) return;
-      set({ entryGate: state, entryGateError: null, entryGateLoading: false, entryGateReceivedAt: performance.now() });
-    } catch (error) {
-      if (request !== gateRequest) return;
-      set({ entryGate: null, entryGateLoading: false, entryGateError: error instanceof Error ? error.message : "Entry gate unavailable. Connect to continue." });
-    }
+    const promise = (async () => {
+      try {
+        const state = await api<EntryGateState>(`/entry-gate?account_id=${encodeURIComponent(account.id)}`);
+        if (request !== gateRequest) return;
+        set({ entryGate: state, entryGateError: null, entryGateLoading: false, entryGateReceivedAt: performance.now() });
+      } catch (error) {
+        if (request !== gateRequest) return;
+        set({ entryGate: null, entryGateLoading: false, entryGateError: error instanceof Error ? error.message : "Entry gate unavailable. Connect to continue." });
+      } finally {
+        if (gateInFlight?.accountId === account.id && gateRequest === request) gateInFlight = null;
+      }
+    })();
+    gateInFlight = { accountId: account.id, promise };
+    return promise;
   },
 
   setTab: (tab) => set({ tab }),
@@ -246,12 +256,26 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   loadTrades: async () => {
+    if (get().trades.length === 0) {
+      const cached = cachedTrades();
+      if (cached.length) set({ trades: cached });
+    }
     try {
       await flushQueue();
     } catch {
       // offline — pending writes stay queued
     }
-    set({ trades: await fetchMergedTrades() });
+    const startedAt = new Date().toISOString();
+    const fetched = await fetchMergedTrades();
+    set((state) => {
+      // A save confirmed while this fetch was in flight must not be wiped by the older snapshot.
+      const merged = new Map(fetched.map((trade) => [trade.id, trade]));
+      for (const trade of state.trades) {
+        const server = merged.get(trade.id);
+        if (trade.updated_at >= startedAt && (!server || trade.updated_at > server.updated_at)) merged.set(trade.id, trade);
+      }
+      return { trades: [...merged.values()].sort((left, right) => right.opened_at.localeCompare(left.opened_at)) };
+    });
     void get().loadEntryGate();
   },
 
@@ -259,7 +283,7 @@ export const useApp = create<AppState>((set, get) => ({
     if (!get().trades.some((trade) => trade.id === t.id)) {
       const saved = await createTrade(t);
       set((state) => ({ trades: [...state.trades.filter((trade) => trade.id !== saved.id), saved].sort((left, right) => right.opened_at.localeCompare(left.opened_at)) }));
-      await get().loadEntryGate();
+      void get().loadEntryGate();
       return;
     }
     set((s) => {

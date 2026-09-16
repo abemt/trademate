@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { getProfile, type Env } from "./context";
+import { DEFAULT_PROFILE, type Env } from "./context";
 import {
   ENTRY_SETUPS, planBlock, sessionBlock, tradingDate,
   validateEntryPlan, type EntryGateState, type EntryPlan, type EntryPlanInput,
@@ -15,37 +15,45 @@ interface DayRow {
 }
 
 export async function entryState(env: Env, accountId: string, now = Date.now()): Promise<EntryGateState> {
-  const account = await env.DB.prepare("SELECT id FROM accounts WHERE id = ? AND archived = 0").bind(accountId).first();
-  if (!account) throw new Error("Select an available trading account first.");
-  const profile = await getProfile(env);
+  // Two round trips instead of nine: the database sits in another region from the trader.
+  const [account, profileRows, legacy] = await env.DB.batch([
+    env.DB.prepare("SELECT id FROM accounts WHERE id = ? AND archived = 0").bind(accountId),
+    env.DB.prepare("SELECT * FROM profile WHERE id = 1"),
+    env.DB.prepare("SELECT opened_at FROM trades WHERE COALESCE(account_id, 'acc-legacy') = ? AND id NOT IN (SELECT trade_id FROM entry_ledger)").bind(accountId),
+  ]);
+  if (!account.results[0]) throw new Error("Select an available trading account first.");
+  const profile = (profileRows.results[0] as Record<string, unknown> | undefined) ?? DEFAULT_PROFILE;
   const timezone = String(profile.timezone ?? "Africa/Addis_Ababa");
   const date = tradingDate(timezone, now);
   const maxTrades = Math.max(1, Math.min(10, Number(profile.max_trades_per_day) || 2));
-  const { results: legacy } = await env.DB.prepare(
-    "SELECT opened_at FROM trades WHERE COALESCE(account_id, 'acc-legacy') = ? AND id NOT IN (SELECT trade_id FROM entry_ledger)",
-  ).bind(accountId).all<{ opened_at: string }>();
-  const legacyCount = legacy.filter((trade) => Number.isFinite(Date.parse(trade.opened_at)) && tradingDate(timezone, Date.parse(trade.opened_at)) === date).length;
-  await env.DB.prepare(
-    `INSERT INTO entry_days (account_id,date,timezone,max_trades,legacy_count) VALUES (?,?,?,?,?)
-     ON CONFLICT(account_id,date) DO UPDATE SET legacy_count = MAX(entry_days.legacy_count, excluded.legacy_count)`,
-  ).bind(accountId, date, timezone, maxTrades, legacyCount).run();
-  const day = await env.DB.prepare("SELECT * FROM entry_days WHERE account_id = ? AND date = ?").bind(accountId, date).first<DayRow>();
+  const legacyCount = (legacy.results as { opened_at: string }[]).filter((trade) => Number.isFinite(Date.parse(trade.opened_at)) && tradingDate(timezone, Date.parse(trade.opened_at)) === date).length;
+  const [, dayRows, countRows, openRows, planRows, history] = await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO entry_days (account_id,date,timezone,max_trades,legacy_count) VALUES (?,?,?,?,?)
+       ON CONFLICT(account_id,date) DO UPDATE SET legacy_count = MAX(entry_days.legacy_count, excluded.legacy_count)`,
+    ).bind(accountId, date, timezone, maxTrades, legacyCount),
+    env.DB.prepare("SELECT * FROM entry_days WHERE account_id = ? AND date = ?").bind(accountId, date),
+    env.DB.prepare("SELECT COUNT(*) AS total FROM entry_ledger WHERE account_id = ? AND date = ?").bind(accountId, date),
+    env.DB.prepare("SELECT COUNT(*) AS total FROM trades WHERE COALESCE(account_id, 'acc-legacy') = ? AND status = 'open' AND deleted = 0").bind(accountId),
+    env.DB.prepare(
+      "SELECT * FROM entry_plans WHERE account_id = ? AND date = ? AND cancelled_at IS NULL AND used_trade_id IS NULL ORDER BY created_at DESC LIMIT 1",
+    ).bind(accountId, date),
+    env.DB.prepare(
+      `SELECT date, sit_out_reason AS reason,
+       legacy_count + (SELECT COUNT(*) FROM entry_ledger WHERE account_id = entry_days.account_id AND date = entry_days.date) AS entries
+       FROM entry_days WHERE account_id = ? AND sit_out_at IS NOT NULL ORDER BY date DESC LIMIT 365`,
+    ).bind(accountId),
+  ]);
+  const day = dayRows.results[0] as DayRow | undefined;
   if (!day) throw new Error("The entry gate is unavailable.");
-  const count = await env.DB.prepare("SELECT COUNT(*) AS total FROM entry_ledger WHERE account_id = ? AND date = ?").bind(accountId, date).first<{ total: number }>();
-  const open = await env.DB.prepare("SELECT COUNT(*) AS total FROM trades WHERE COALESCE(account_id, 'acc-legacy') = ? AND status = 'open' AND deleted = 0").bind(accountId).first<{ total: number }>();
-  const plan = await env.DB.prepare(
-    "SELECT * FROM entry_plans WHERE account_id = ? AND date = ? AND cancelled_at IS NULL AND used_trade_id IS NULL ORDER BY created_at DESC LIMIT 1",
-  ).bind(accountId, date).first<PlanRow>();
-  const history = await env.DB.prepare(
-    `SELECT date, sit_out_reason AS reason,
-     legacy_count + (SELECT COUNT(*) FROM entry_ledger WHERE account_id = entry_days.account_id AND date = entry_days.date) AS entries
-     FROM entry_days WHERE account_id = ? AND sit_out_at IS NOT NULL ORDER BY date DESC LIMIT 365`,
-  ).bind(accountId).all<{ date: string; reason: string; entries: number }>();
+  const count = countRows.results[0] as { total: number } | undefined;
+  const open = openRows.results[0] as { total: number } | undefined;
+  const plan = planRows.results[0] as PlanRow | undefined;
   return {
     account_id: accountId, date, timezone: day.timezone, server_now: new Date(now).toISOString(),
     trade_count: day.legacy_count + (count?.total ?? 0), open_count: open?.total ?? 0, max_trades: day.max_trades,
     sit_out: day.sit_out_at ? { reason: day.sit_out_reason ?? "", created_at: day.sit_out_at } : null,
-    sit_out_days: history.results,
+    sit_out_days: history.results as { date: string; reason: string; entries: number }[],
     plan: plan ? { ...plan, details: JSON.parse(plan.details) as EntryPlanInput } : null,
   };
 }

@@ -27,5 +27,8 @@
   // activation + billing info, which the free build avoids.
   // 05:00 UTC weekdays = 08:00 Addis (pre-London briefing) · news scan every 20 min
   "triggers": { "crons": ["0 5 * * 1-5", "*/20 * * * *"] },
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
+  // The D1 database runs in WEUR. Running the API beside it turns each ~150 ms Addis-to-Europe
+  // query hop into ~1 ms; static assets still serve from the edge nearest the trader.
+  "placement": { "region": "aws:eu-central-1" }
 }

@@ -30,6 +30,12 @@ function timingSafeEqual(a: string, b: string): boolean {
 
 const app = new Hono<{ Bindings: Env }>().basePath("/api");
 
+app.use("*", async (c, next) => {
+  const started = Date.now();
+  await next();
+  console.log(`${c.req.method} ${new URL(c.req.url).pathname} ${c.res.status} ${Date.now() - started}ms`);
+});
+
 // ---------- public routes ----------
 
 app.get("/health", (c) =>

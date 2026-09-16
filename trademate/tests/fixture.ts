@@ -22,9 +22,10 @@ export function fixture() {
   db.prepare("INSERT INTO accounts (id,label,type,starting_balance,active,archived,created_at) VALUES ('gate-test','Test','demo',10000,0,0,datetime('now'))").run();
   const env = { DB: {
     prepare: (sql: string) => new Statement(db, sql),
+    // Like D1, every statement in a batch reports its rows (empty for writes) inside one transaction.
     batch: async (statements: Statement[]) => {
       db.exec("BEGIN");
-      try { const result = []; for (const statement of statements) result.push(await statement.run()); db.exec("COMMIT"); return result; }
+      try { const result = []; for (const statement of statements) result.push(await statement.all()); db.exec("COMMIT"); return result; }
       catch (error) { db.exec("ROLLBACK"); throw error; }
     },
   } } as unknown as Env;

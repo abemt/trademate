@@ -92,6 +92,15 @@ export async function fetchMergedTrades(): Promise<Trade[]> {
   } catch {
     server = readJson<TradeRow[]>(CACHE_KEY, []);
   }
+  return mergePending(server);
+}
+
+/** What the last successful sync left behind, so the journal renders before the network answers. */
+export function cachedTrades(): Trade[] {
+  return mergePending(readJson<TradeRow[]>(CACHE_KEY, []));
+}
+
+function mergePending(server: TradeRow[]): Trade[] {
   const map = new Map(server.map((r) => [r.id, fromRow(r)]));
   for (const row of readJson<TradeRow[]>(QUEUE_KEY, [])) {
     const pending = fromRow(row);
