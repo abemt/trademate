@@ -7,6 +7,7 @@ import { Sheet } from "./Sheet";
 import { api } from "../lib/api";
 import { useApp } from "../lib/store";
 import { EntryGate, PlanSummary } from "./EntryGate";
+import { RiskInput, riskPctOf } from "./RiskInput";
 import { useEntryGate } from "../lib/useEntryGate";
 import { ENTRY_SETUPS, planBlock, type EntryPlan } from "../../shared/entryGate";
 import { lineCrossed, type DayPlan } from "../../shared/biasCall";
@@ -22,8 +23,6 @@ import {
   TIMEFRAMES,
   TRADE_SESSIONS,
   TRIGGERS,
-  accountTrades,
-  currentBalance,
   currentSessionId,
   type Trade,
 } from "../lib/trades";
@@ -80,7 +79,6 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
 }) {
   const profile = useApp((s) => s.profile);
   const saveTrade = useApp((s) => s.saveTrade);
-  const trades = useApp((s) => s.trades);
   const accounts = useApp((s) => s.accounts);
   const activeAccount = accounts.find((a) => a.active === 1 && a.archived === 0) ?? null;
   const gate = useEntryGate();
@@ -93,10 +91,8 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
     const date = new Date(existing?.opened_at ?? Date.now());
     return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
   });
-  const accountSize = currentBalance(
-    activeAccount?.starting_balance ?? profile?.account_size ?? 10_000,
-    accountTrades(trades, activeAccount?.id ?? null),
-  );
+  // Risk is a share of the ACCOUNT SIZE (starting balance), so 0.2% of a $10k eval is exactly $20.
+  const accountSize = activeAccount?.starting_balance ?? profile?.account_size ?? 10_000;
 
   const base = existing ?? prefill ?? null;
   const initialSetup = lockedPlan ? ENTRY_SETUPS.find((candidate) => candidate.id === lockedPlan.details.setup)!.label : base?.setup_type ?? null;
@@ -111,8 +107,8 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
   const [trigger, setTrigger] = useState<string | null>(base?.entry_trigger ?? null);
   const [timeframe, setTimeframe] = useState<string | null>(base?.timeframe ?? "M15");
   const [session, setSession] = useState<string>(base?.session ?? currentSessionId());
-  const [riskPct, setRiskPct] = useState<number>(
-    existing?.risk_pct ?? profile?.risk_pct_min ?? 0.5,
+  const [riskUsd, setRiskUsd] = useState<number>(() =>
+    existing?.risk_usd ?? Math.round(((accountSize * (profile?.risk_pct_min ?? 0.5)) / 100) * 100) / 100,
   );
   const [slPips, setSlPips] = useState<number>(existing?.sl_pips ?? 75);
   const [entryPrice, setEntryPrice] = useState<string>(
@@ -151,7 +147,7 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
   );
   const [error, setError] = useState<string>("");
 
-  const riskUsd = Math.round(((accountSize * riskPct) / 100) * 100) / 100;
+  const riskPct = riskPctOf(riskUsd, accountSize);
   const lots = Math.max(0.01, Math.floor((riskUsd / (slPips * 10)) * 100) / 100);
 
   function loadPlans() {
@@ -484,30 +480,11 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
       </div>
 
       <div>
-        <FieldLabel>Risk</FieldLabel>
-        <div className="flex flex-wrap items-center gap-2">
-          {[0.25, 0.5, 1, 2].map((r) => (
-            <Chip key={r} active={riskPct === r} onClick={() => setRiskPct(r)}>
-              {r}%
-            </Chip>
-          ))}
-          <span className="text-xs text-ink-400">$</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            value={riskUsd > 0 ? String(riskUsd) : ""}
-            onChange={(e) => {
-              const usd = Number.parseFloat(e.target.value);
-              if (Number.isFinite(usd) && usd >= 0 && accountSize > 0)
-                setRiskPct(Math.round((usd / accountSize) * 10000) / 100);
-            }}
-            className="w-20 rounded-lg border border-white/10 bg-ink-800 px-2 py-1.5 text-sm font-semibold text-white outline-none focus:border-gold-500/60"
-          />
-          <span className="ml-auto text-xs text-ink-400">
-            <span className="font-semibold text-gold-300">{lots.toFixed(2)} lots</span> · {riskPct}% · $
-            {riskUsd.toFixed(0)} at risk
-          </span>
-        </div>
+        <FieldLabel>Risk — of the ${accountSize.toLocaleString(undefined, { maximumFractionDigits: 0 })} account size</FieldLabel>
+        <RiskInput base={accountSize} riskUsd={riskUsd} onChange={setRiskUsd} />
+        <p className="mt-2 text-xs text-ink-400">
+          <span className="font-semibold text-gold-300">{lots.toFixed(2)} lots</span> · {riskPct}% · ${Math.round(riskUsd * 100) / 100} at risk at {slPips} pips
+        </p>
         <label className="mt-2 block text-xs text-ink-300">
           Stop loss: <span className="font-semibold text-white">{slPips} pips</span>
           <input

@@ -33,6 +33,7 @@ import {
   optionLabel,
 } from "../lib/trades";
 import { EquityCurve } from "../components/EquityCurve";
+import { RiskInput, riskPctOf } from "../components/RiskInput";
 import {
   SESSIONS,
   formatCountdown,
@@ -185,8 +186,6 @@ function TradeTokens() {
     </Card>
   );
 }
-
-const RISK_CHOICES = [0.25, 0.5, 1.0, 2.0];
 
 const RANGES = [
   { id: "1d", label: "Today", days: 1 },
@@ -341,14 +340,15 @@ function RiskCalc() {
   const trades = useApp((s) => s.trades);
   const accounts = useApp((s) => s.accounts);
   const active = accounts.find((a) => a.active === 1 && a.archived === 0) ?? null;
-  const accountSize = currentBalance(
-    active?.starting_balance ?? profile?.account_size ?? 10_000,
-    accountTrades(trades, active?.id ?? null),
-  );
-  const [riskPct, setRiskPct] = useState(0.5);
+  // Risk is a share of the ACCOUNT SIZE, not the drifting live balance: 1% of a $10k eval is $100.
+  const accountSize = active?.starting_balance ?? profile?.account_size ?? 10_000;
+  const liveBalance = currentBalance(accountSize, accountTrades(trades, active?.id ?? null));
+  const [riskUsd, setRiskUsd] = useState(() => (accountSize * (profile?.risk_pct_min ?? 0.5)) / 100);
   const [slPips, setSlPips] = useState(75);
+  // Accounts arrive after first paint; re-seed the default once the real account size is known.
+  useEffect(() => { setRiskUsd((accountSize * (profile?.risk_pct_min ?? 0.5)) / 100); }, [accountSize, profile?.risk_pct_min]);
 
-  const riskUsd = (accountSize * riskPct) / 100;
+  const riskPct = riskPctOf(riskUsd, accountSize);
   const idealLots = Math.floor((riskUsd / (slPips * 10)) * 100) / 100; // XAUUSD: $10/pip per lot
   const belowMin = idealLots < 0.01;
   // Broker minimum is 0.01 lots — on tiny accounts that IS the position, so show its real risk.
@@ -357,38 +357,11 @@ function RiskCalc() {
 
   return (
     <Card title="Risk Guard" icon={<IconShield />} badge={active?.label ?? profile?.account_label ?? "account"}>
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        {RISK_CHOICES.map((r) => (
-          <button
-            key={r}
-            onClick={() => setRiskPct(r)}
-            className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
-              riskPct === r
-                ? "bg-gold-500 text-ink-950"
-                : "border border-white/10 bg-ink-800 text-ink-300 hover:text-white"
-            }`}
-          >
-            {r}%
-          </button>
-        ))}
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-ink-400">$</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            value={riskUsd > 0 ? String(Math.round(riskUsd * 100) / 100) : ""}
-            onChange={(e) => {
-              const usd = Number.parseFloat(e.target.value);
-              if (Number.isFinite(usd) && usd >= 0 && accountSize > 0)
-                setRiskPct(Math.round((usd / accountSize) * 10000) / 100);
-            }}
-            className="w-20 rounded-lg border border-white/10 bg-ink-800 px-2 py-1.5 text-sm font-semibold text-white outline-none focus:border-gold-500/60"
-          />
-        </div>
-        <span className="ml-auto self-center text-xs text-ink-400">
-          {riskPct}% · ${accountSize.toLocaleString(undefined, { maximumFractionDigits: 0 })} balance
-        </span>
-      </div>
+      <RiskInput base={accountSize} riskUsd={riskUsd} onChange={setRiskUsd} className="mb-2" />
+      <p className="mb-3 text-xs text-ink-400">
+        {riskPct}% of the ${accountSize.toLocaleString(undefined, { maximumFractionDigits: 0 })} account size
+        {Math.round(liveBalance) !== Math.round(accountSize) ? ` · live balance $${liveBalance.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : ""}
+      </p>
 
       <label className="block text-xs text-ink-300">
         Stop loss: <span className="font-semibold text-white">{slPips} pips</span>
