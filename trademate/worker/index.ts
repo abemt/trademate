@@ -13,6 +13,8 @@ import { generateBriefing, scanNews, weeklyReport } from "./market";
 import { pushAll } from "./push";
 import { entryGateRoutes, guardTradeWrites } from "./entryGate";
 import { URGE_OUTCOMES, validateUrge, type UrgeOutcome } from "../shared/urges";
+import { isReadCall, isReadTrend, readConflict, structureOnlyProblem, type DayPlan } from "../shared/biasCall";
+import { dailyBars, scoreDayPlans, spotPrice } from "./price";
 
 const COOKIE = "tm_session";
 const SESSION_DAYS = 30;
@@ -207,10 +209,14 @@ function cleanTrade(x: Record<string, unknown>): Record<string, unknown> | null 
 
 // ---------- pre-session routine ----------
 
+const LEGACY_BIASES = new Set(["neutral", "both"]);
+
 app.get("/dayplan", async (c) => {
   const date = c.req.query("date") ?? "";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return c.json({ plan: null });
   try {
+    // Grading happens whenever the app looks at a plan, so yesterday's read is settled by the time he opens Today.
+    await scoreDayPlans(c.env).catch(() => 0);
     const row = await c.env.DB.prepare("SELECT * FROM day_plans WHERE date = ?")
       .bind(date)
       .first();
@@ -220,22 +226,63 @@ app.get("/dayplan", async (c) => {
   }
 });
 
+app.get("/dayplan/history", async (c) => {
+  const limit = Math.max(1, Math.min(60, Number(c.req.query("limit")) || 20));
+  try {
+    await scoreDayPlans(c.env).catch(() => 0);
+    const { results } = await c.env.DB.prepare(
+      "SELECT * FROM day_plans WHERE called_at IS NOT NULL ORDER BY date DESC LIMIT ?",
+    ).bind(limit).all<DayPlan>();
+    return c.json({ plans: results });
+  } catch {
+    return c.json({ plans: [] });
+  }
+});
+
 app.post("/dayplan", async (c) => {
   const b = await c.req
-    .json<{ date?: string; bias?: string; narrative?: string; must_see?: string; invalidation?: string; no_trade?: string; review?: string }>()
+    .json<{ date?: string; bias?: string; trend?: string; narrative?: string; must_see?: string; invalidation?: string; invalidation_price?: unknown; no_trade?: string; review?: string }>()
     .catch(() => null);
   if (!b?.date || !/^\d{4}-\d{2}-\d{2}$/.test(b.date)) return c.json({ error: "date required" }, 400);
   const s = (v: unknown, max: number) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
-  const bias = ["bullish", "bearish", "neutral", "both"].includes(b.bias ?? "") ? b.bias : null;
+  const existing = await c.env.DB.prepare("SELECT * FROM day_plans WHERE date = ?").bind(b.date).first<DayPlan>();
+  const locked = Boolean(existing?.called_at);
+  let bias = isReadCall(b.bias) || LEGACY_BIASES.has(b.bias ?? "") ? (b.bias as string) : null;
+  let trend = isReadTrend(b.trend) ? b.trend : null;
+  let narrative = s(b.narrative, 2000);
+  let invalidation = s(b.invalidation, 1000);
+  const rawLine = typeof b.invalidation_price === "string" ? Number.parseFloat(b.invalidation_price) : b.invalidation_price;
+  let invalidationPrice = typeof rawLine === "number" && Number.isFinite(rawLine) && rawLine > 0 ? Math.round(rawLine * 100) / 100 : null;
+  let priceAtCall = existing?.price_at_call ?? null;
+  let calledAt = existing?.called_at ?? null;
+  if (locked && existing) {
+    // The read is a commitment: once locked, only the must-see, sit-out and review lines can change.
+    bias = existing.bias; trend = existing.trend; narrative = existing.narrative;
+    invalidation = existing.invalidation; invalidationPrice = existing.invalidation_price;
+  } else {
+    const newsWord = structureOnlyProblem(narrative) ?? structureOnlyProblem(invalidation);
+    if (newsWord) return c.json({ error: `Structure only. Delete "${newsWord}" and write what price did: the swings, the level, the trigger. The news is already in the candles.` }, 400);
+    if (isReadCall(bias)) {
+      if (!trend) return c.json({ error: "Name the daily structure first: higher highs, lower lows, or overlapping." }, 400);
+      const conflict = readConflict(trend, bias);
+      if (conflict) return c.json({ error: conflict }, 400);
+      if (!narrative || narrative.length < 8) return c.json({ error: "Write what the chart shows (a sentence is enough)." }, 400);
+      if (bias !== "no_trade" && invalidationPrice === null) return c.json({ error: "Write the price that proves this read wrong. A read without a line is a hope." }, 400);
+      calledAt = new Date().toISOString();
+      priceAtCall = (await spotPrice(c.env)).price;
+    }
+  }
   await c.env.DB.prepare(
-    `INSERT INTO day_plans (date, bias, narrative, must_see, invalidation, no_trade, review, updated_at)
-     VALUES (?,?,?,?,?,?,?,datetime('now'))
-     ON CONFLICT(date) DO UPDATE SET bias=excluded.bias, narrative=excluded.narrative, must_see=excluded.must_see,
-       invalidation=excluded.invalidation, no_trade=excluded.no_trade, review=excluded.review, updated_at=excluded.updated_at`,
+    `INSERT INTO day_plans (date, bias, trend, narrative, must_see, invalidation, invalidation_price, no_trade, review, price_at_call, called_at, updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+     ON CONFLICT(date) DO UPDATE SET bias=excluded.bias, trend=excluded.trend, narrative=excluded.narrative, must_see=excluded.must_see,
+       invalidation=excluded.invalidation, invalidation_price=excluded.invalidation_price, no_trade=excluded.no_trade, review=excluded.review,
+       price_at_call=excluded.price_at_call, called_at=excluded.called_at, updated_at=excluded.updated_at`,
   )
-    .bind(b.date, bias, s(b.narrative, 2000), s(b.must_see, 2000), s(b.invalidation, 1000), s(b.no_trade, 1000), s(b.review, 2000))
+    .bind(b.date, bias, trend, narrative, s(b.must_see, 2000), invalidation, invalidationPrice, s(b.no_trade, 1000), s(b.review, 2000), priceAtCall, calledAt)
     .run();
-  return c.json({ ok: true });
+  const plan = await c.env.DB.prepare("SELECT * FROM day_plans WHERE date = ?").bind(b.date).first<DayPlan>();
+  return c.json({ ok: true, plan, locked: Boolean(plan?.called_at) });
 });
 
 app.get("/routine", async (c) => {
@@ -867,44 +914,18 @@ app.post("/coach/weekly", async (c) => {
 // ---------- live price (90s edge cache to respect TwelveData free tier) ----------
 
 app.get("/price", async (c) => {
-  if (!c.env.TWELVEDATA_API_KEY) return c.json({ price: null });
-  const cacheKey = new Request("https://cache.trademate.internal/price");
-  try {
-    const hit = await caches.default.match(cacheKey);
-    if (hit) {
-      const body = await hit.text();
-      return new Response(body, {
-        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
-      });
-    }
-  } catch {
-    // cache unavailable (workers.dev) — fall through
-  }
-  let price: number | null = null;
-  try {
-    const r = (await (
-      await fetch(
-        `https://api.twelvedata.com/price?symbol=XAU/USD&apikey=${c.env.TWELVEDATA_API_KEY}`,
-      )
-    ).json()) as { price?: string };
-    if (r.price) price = Number.parseFloat(r.price);
-  } catch {
-    // provider down
-  }
-  const payload = JSON.stringify({ price, at: new Date().toISOString() });
-  try {
-    await caches.default.put(
-      cacheKey,
-      new Response(payload, {
-        headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=30" },
-      }),
-    );
-  } catch {
-    // cache unavailable
-  }
-  return new Response(payload, {
+  const payload = await spotPrice(c.env);
+  return new Response(JSON.stringify(payload), {
     headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
   });
+});
+
+app.get("/price/daily", async (c) => {
+  try {
+    return c.json({ bars: (await dailyBars(c.env)).slice(-20) });
+  } catch {
+    return c.json({ bars: [] });
+  }
 });
 
 // ---------- zones ----------
@@ -1048,6 +1069,7 @@ export default {
   fetch: app.fetch,
   scheduled: async (event: ScheduledController, env: Env) => {
     if (event.cron === "0 5 * * 1-5") {
+      await scoreDayPlans(env).catch(() => 0);
       await generateBriefing(env, { push: true }).catch(() => {});
     } else if (marketOpen()) {
       await scanNews(env).catch(() => {});

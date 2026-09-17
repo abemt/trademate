@@ -9,6 +9,7 @@ import { useApp } from "../lib/store";
 import { EntryGate, PlanSummary } from "./EntryGate";
 import { useEntryGate } from "../lib/useEntryGate";
 import { ENTRY_SETUPS, planBlock, type EntryPlan } from "../../shared/entryGate";
+import { lineCrossed, type DayPlan } from "../../shared/biasCall";
 import {
   BODY_SCALE,
   CONFLUENCES,
@@ -143,7 +144,8 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
   const [planSetup, setPlanSetup] = useState<string>(lockedPlan ? `${lockedPlan.details.bias.toUpperCase()}: ${lockedPlan.details.thesis}` : base?.plan_setup ?? "");
   const [planEntry, setPlanEntry] = useState<string>(lockedPlan ? `${lockedPlan.details.conditions.join("\n")}\nInvalidation: ${lockedPlan.details.invalidation_price} - ${lockedPlan.details.invalidation_rule}\nWalk away: ${lockedPlan.details.no_trade_if}` : base?.plan_entry ?? "");
   const [lesson, setLesson] = useState<string>(base?.lesson ?? "");
-  const [dayPlan, setDayPlan] = useState<{ bias: string | null; must_see: string | null } | null>(null);
+  const [dayPlan, setDayPlan] = useState<Pick<DayPlan, "bias" | "must_see" | "invalidation_price" | "called_at"> | null>(null);
+  const [spot, setSpot] = useState<number | null>(null);
   const [autopilot, setAutopilot] = useState<number | null>(
     existing?.autopilot ?? prefill?.autopilot ?? null,
   );
@@ -161,10 +163,16 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
     loadPlans();
     const today = new Date();
     const key = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-    api<{ plan: { bias: string | null; must_see: string | null } | null }>(`/dayplan?date=${key}`)
+    api<{ plan: Pick<DayPlan, "bias" | "must_see" | "invalidation_price" | "called_at"> | null }>(`/dayplan?date=${key}`)
       .then((r) => setDayPlan(r.plan))
       .catch(() => {});
+    api<{ price: number | null }>("/price").then((r) => setSpot(r.price)).catch(() => {});
   }, []);
+
+  const readCrossed = dayPlan ? lineCrossed(dayPlan.bias, dayPlan.invalidation_price, spot) : false;
+  const readConflict = !existing && dayPlan?.called_at && direction && !readCrossed && (
+    (dayPlan.bias === "bullish" && direction === "short") || (dayPlan.bias === "bearish" && direction === "long") || dayPlan.bias === "no_trade"
+  );
 
   function toggleEmotion(id: string) {
     setEmotions((prev) =>
@@ -323,6 +331,18 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
         </div>
       </fieldset>
 
+      {readConflict && (
+        <p role="alert" className="rounded-xl border border-down/40 bg-down/10 p-3 text-xs font-semibold text-down">
+          {dayPlan?.bias === "no_trade"
+            ? "Your morning read said NO TRADE today. Sitting out was the trade. If you enter anyway, the day is a rule break by your own call."
+            : `Your morning read is ${dayPlan?.bias?.toUpperCase()} and your line (${dayPlan?.invalidation_price ?? "—"}) has not been crossed. A ${direction} here is the narrative talking, not the chart.`}
+        </p>
+      )}
+      {!existing && dayPlan?.called_at && readCrossed && (
+        <p role="status" className="rounded-xl border border-gold-500/30 bg-gold-500/10 p-3 text-xs text-gold-300">
+          Your {dayPlan.bias} read is over — the line ({dayPlan.invalidation_price}) was crossed. Trade only what the chart shows now, with a fresh plan.
+        </p>
+      )}
       {!violation && !lockedPlan && <div className="rounded-2xl border border-gold-500/25 bg-gold-500/5 p-3.5">
         <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-gold-400">
           {protectedPlan ? "Plan (locked before entry)" : "Recorded plan"}

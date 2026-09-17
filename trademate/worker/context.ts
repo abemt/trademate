@@ -1,6 +1,8 @@
 import { MATE_PERSONA, callAI, type AIMessage } from "./ai";
 import type { EntryPlanInput } from "../shared/entryGate";
 import { summarizeUrges, type UrgeEntry } from "../shared/urges";
+import { READ_TRENDS, isReadCall, lineCrossed, summarizeReads, type DayPlan } from "../shared/biasCall";
+import { spotPrice } from "./price";
 
 export interface Env {
   DB: D1Database;
@@ -259,16 +261,34 @@ export async function traderContext(env: Env): Promise<string> {
   try {
     const dp = await env.DB.prepare("SELECT * FROM day_plans WHERE date = ?")
       .bind(today)
-      .first<{ bias: string | null; narrative: string | null; must_see: string | null; invalidation: string | null; no_trade: string | null; review: string | null }>();
+      .first<DayPlan>();
     if (dp) {
       const p: string[] = [];
-      if (dp.bias) p.push(`bias ${dp.bias.toUpperCase()}`);
-      if (dp.narrative) p.push(`expects: "${dp.narrative.slice(0, 160)}"`);
+      if (dp.called_at && isReadCall(dp.bias)) {
+        const trend = READ_TRENDS.find((option) => option.id === dp.trend)?.label ?? "structure not named";
+        p.push(`MORNING READ locked at ${dp.called_at.slice(11, 16)} UTC${dp.price_at_call ? ` with spot ${dp.price_at_call}` : ""}: ${dp.bias === "no_trade" ? "NO TRADE (choppy / no edge)" : dp.bias!.toUpperCase()} — daily structure ${trend}`);
+        if (dp.invalidation_price) {
+          const { price } = await spotPrice(env);
+          if (lineCrossed(dp.bias, dp.invalidation_price, price)) {
+            p.push(`HIS OWN LINE (${dp.invalidation_price}) HAS BEEN CROSSED — spot ${price}. By his rule the ${dp.bias} read is DEAD. Say so plainly; a new trade in the old direction is the narrative talking, not the chart. Trading the new direction is allowed only with a fresh written plan`);
+          } else {
+            p.push(`his line: wrong ${dp.bias === "bullish" ? "below" : "above"} ${dp.invalidation_price}${price ? ` (spot ${price}, line intact)` : ""}`);
+          }
+        }
+      } else if (dp.bias) p.push(`bias ${dp.bias.toUpperCase()} (unscored legacy plan)`);
+      if (dp.narrative) p.push(`the chart shows: "${dp.narrative.slice(0, 160)}"`);
       if (dp.must_see) p.push(`must see before entry: "${dp.must_see.slice(0, 160)}"`);
       if (dp.invalidation) p.push(`wrong if: "${dp.invalidation.slice(0, 100)}"`);
       if (dp.no_trade) p.push(`sits out if: "${dp.no_trade.slice(0, 100)}"`);
       if (dp.review) p.push(`his end-of-day review: "${dp.review.slice(0, 160)}"`);
       if (p.length) dayPlanLine = "Today's written day plan — " + p.join(" · ");
+    }
+    const history = await env.DB.prepare(
+      "SELECT date, result, invalidated FROM day_plans WHERE result IS NOT NULL ORDER BY date DESC LIMIT 20",
+    ).all<Pick<DayPlan, "date" | "result" | "invalidated">>();
+    const card = summarizeReads(history.results);
+    if (card.scored) {
+      dayPlanLine += `\nMorning-read scorecard (last ${card.scored} graded days): ${card.right} right, ${card.wrong} wrong, ${card.flat} flat${card.pct !== null ? ` → ${card.pct}% of decided reads right` : ""}; his line was crossed on ${card.invalidated} of them${card.streak ? `; current streak ${card.streak.length} ${card.streak.result}` : ""}. Grade the READ, not the P&L: sitting out a choppy day he called choppy is a correct read.`;
     }
   } catch {
     // table may not exist yet
@@ -317,7 +337,7 @@ Judge TODAY strictly from this account's section. Never attribute another accoun
 
 HIS CURRENT CONTRACT (LIVE — the numbers come from his profile and OVERRIDE any older version you remember):
 1. The account's job is REPS, not compounding. Success = rule-compliant trades; balance is irrelevant.
-2. Plan BEFORE entry, every time: bias, direction (must not contradict the bias), playbook setup, the three things he must see, and the invalidation price are written and saved before the order. No plan, no trade. An entry logged without a prior plan is a rule break even if it wins. No trade is owed to the market. Place broker protection as required by the trading plan; TradeMate does not place broker orders.
+2. Plan BEFORE entry, every time: bias, direction (must not contradict the bias), playbook setup, the three things he must see, and the invalidation price are written and saved before the order. No plan, no trade. An entry logged without a prior plan is a rule break even if it wins. No trade is owed to the market. Place broker protection as required by the trading plan; TradeMate does not place broker orders. The MORNING READ is locked before the session and names the daily structure, one call (bullish / bearish / no trade) and the price that proves it wrong — written from price only, never from news. He trades only in the direction of his read; if his line is crossed the read is dead and he may only trade the new direction with a fresh plan. A no-trade call on a choppy day that he then sits out is a WIN.
 3. MAX ${profile.max_trades_per_day} trade(s) per day — this number is his CURRENT rule.${Number(profile.max_trades_per_day) === 1 ? " One loss = done for the day." : ""}
 4. SL moves to break-even ONLY after a new structure point confirms beyond entry on a 15-MINUTE CLOSE — never from fear, never on a wick.
 5. Red-flag sentences — call them out the moment you hear them: "one last $10", "one more try", "I'll win it back", "one loss won't take me anywhere", "it's basically there" / a "half" setup, or wanting to deposit right after a blowup. That is Autopilot talking, not him.
