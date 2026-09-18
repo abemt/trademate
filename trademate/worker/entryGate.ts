@@ -30,7 +30,8 @@ export async function entryState(env: Env, accountId: string, now = Date.now()):
   const [, dayRows, countRows, openRows, planRows, history] = await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO entry_days (account_id,date,timezone,max_trades,legacy_count) VALUES (?,?,?,?,?)
-       ON CONFLICT(account_id,date) DO UPDATE SET legacy_count = MAX(entry_days.legacy_count, excluded.legacy_count)`,
+       ON CONFLICT(account_id,date) DO UPDATE SET legacy_count = MAX(entry_days.legacy_count, excluded.legacy_count),
+         max_trades = MIN(entry_days.max_trades, excluded.max_trades)`,
     ).bind(accountId, date, timezone, maxTrades, legacyCount),
     env.DB.prepare("SELECT * FROM entry_days WHERE account_id = ? AND date = ?").bind(accountId, date),
     env.DB.prepare("SELECT COUNT(*) AS total FROM entry_ledger WHERE account_id = ? AND date = ?").bind(accountId, date),

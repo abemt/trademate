@@ -133,12 +133,14 @@ function TradeTokens() {
   const timezone = profile?.timezone ?? "Africa/Addis_Ababa";
   const max = state?.max_trades ?? profile?.max_trades_per_day ?? 2;
   const today = tradingDate(timezone);
+  // The cap for a day is fixed when the session starts; a higher setting only applies from the next day.
+  const pendingMax = state?.date === today && profile && profile.max_trades_per_day > state.max_trades ? profile.max_trades_per_day : null;
   const used = state?.date === today ? state.trade_count : accountTrades(trades, active?.id ?? null).filter((trade) => tradingDate(timezone, Date.parse(trade.opened_at)) === today).length;
   const over = used > max;
   const left = Math.max(0, max - used);
 
   return (
-    <Card title="Trade tokens" icon={<IconCoin />} badge={`your rule: max ${max}/day`}>
+    <Card title="Trade tokens" icon={<IconCoin />} badge={pendingMax ? `today: max ${max} · from tomorrow: ${pendingMax}` : `your rule: max ${max}/day`}>
       <div className="flex items-center gap-4">
         <div className="flex max-w-48 flex-wrap gap-3">
           {Array.from({ length: max }, (_, i) => {
@@ -172,6 +174,11 @@ function TradeTokens() {
               : state?.sit_out ? "Done for today. Unused tokens are not a target." : `${left} trade${left === 1 ? "" : "s"} left today. Plan first, then enter.`}
         </p>
       </div>
+      {pendingMax && (
+        <p className="mt-3 rounded-xl border border-gold-500/30 bg-gold-500/10 p-2.5 text-xs text-gold-300">
+          You set {pendingMax}/day. Today stays at {max}: the cap is fixed before the session and can only go down during it, never up. {pendingMax} starts with the next trading day.
+        </p>
+      )}
       <motion.button
         whileTap={{ scale: 0.98 }}
         onClick={() => {

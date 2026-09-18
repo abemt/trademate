@@ -65,6 +65,17 @@ test("the daily cap blocks a third planned entry but the honest unplanned record
   assert.equal((await entryState(env, "gate-test")).trade_count, 3);
 });
 
+test("the day's cap is fixed once the session starts: raising the setting waits for tomorrow, lowering applies now", async () => {
+  const { db, env } = fixture();
+  db.prepare("UPDATE profile SET max_trades_per_day = 1 WHERE id = 1").run();
+  assert.equal((await entryState(env, "gate-test")).max_trades, 1);
+  db.prepare("UPDATE profile SET max_trades_per_day = 3 WHERE id = 1").run();
+  assert.equal((await entryState(env, "gate-test")).max_trades, 1, "no mid-session raise");
+  db.prepare("UPDATE entry_days SET max_trades = 3").run();
+  db.prepare("UPDATE profile SET max_trades_per_day = 2 WHERE id = 1").run();
+  assert.equal((await entryState(env, "gate-test")).max_trades, 2, "lowering is always allowed");
+});
+
 test("sit-out locks the day, cancels the live plan, and counts as a win only with zero entries", async () => {
   const { env, request } = fixture();
   const state = await (await request("/entry-gate/plans", { account_id: "gate-test", details })).json();
