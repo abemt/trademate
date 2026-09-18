@@ -11,7 +11,7 @@
     "db:migrate:local": "wrangler d1 migrations apply trademate-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply trademate-db --remote",
     "typecheck": "tsc --noEmit",
-    "test:gate": "tsx --test tests/entryGate.test.mjs tests/entryGateApi.test.ts tests/urgeLog.test.ts tests/biasCall.test.ts"
+    "test:gate": "tsx --test tests/entryGate.test.mjs tests/entryGateApi.test.ts tests/urgeLog.test.ts tests/biasCall.test.ts tests/ai.test.ts"
   },
   "dependencies": {
     "framer-motion": "^12.0.0",

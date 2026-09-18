@@ -23,49 +23,140 @@ interface AIEnv {
   GITHUB_MODELS_TOKEN?: string;
 }
 
-// Pinned stable — the "latest" alias hot-swaps to new major versions with breaking
-// generationConfig changes (that's how thinkingBudget started returning HTTP 400).
+// Preferred names, not hard requirements: each provider's live model list is consulted and any
+// candidate that 404s is skipped, so a rename upstream degrades to the next model instead of
+// killing the chain (gemini-3.6-flash-lite never existed; Groq retired llama-3.3 / llama-4-scout).
 const GEMINI_MODEL = "gemini-3.6-flash";
-// Lite has its own (larger) free-tier quota bucket — text goes there first,
-// vision prefers flash; each falls back to the other on 429/outage.
-const GEMINI_LITE_MODEL = "gemini-3.6-flash-lite";
-// Groq decommissioned llama-3.3-70b + llama-4-scout in mid-2026 (HTTP 404).
+// Lite has its own (larger) free-tier quota bucket — text goes there first, vision prefers flash.
+const GEMINI_LITE_MODEL = "gemini-3.5-flash-lite";
+const GEMINI_FALLBACK = ["gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash"];
 const GROQ_TEXT_MODEL = "openai/gpt-oss-120b";
 const GROQ_VISION_MODEL = "qwen/qwen3.6-27b";
+const GROQ_TEXT_PREFERENCE = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant", "qwen/qwen3-32b", "moonshotai/kimi-k2-instruct"];
+const GROQ_VISION_PATTERN = /qwen.*(3\.6|vl)|llama-4|scout|maverick/i;
 // GitHub Models free tier — OpenAI-compatible, tight daily rate limits, fine as last resort.
 const GITHUB_MODEL = "openai/gpt-4.1";
+
+const MODEL_LIST_TTL_MS = 60 * 60 * 1000;
+const modelLists = new Map<string, { at: number; models: string[] }>();
+
+/** Test hook: forget discovered model lists. */
+export function resetModelCache(): void {
+  modelLists.clear();
+}
+
+async function rememberedList(key: string, load: () => Promise<string[]>): Promise<string[]> {
+  const hit = modelLists.get(key);
+  if (hit && Date.now() - hit.at < MODEL_LIST_TTL_MS) return hit.models;
+  try {
+    const models = await load();
+    if (models.length) modelLists.set(key, { at: Date.now(), models });
+    return models;
+  } catch {
+    return hit?.models ?? [];
+  }
+}
+
+const GEMINI_FLASH = /^gemini-(\d+)(?:\.(\d+))?-flash(-lite)?$/;
+
+function geminiVersion(name: string): number {
+  const match = GEMINI_FLASH.exec(name);
+  return match ? Number(match[1]) + Number(match[2] ?? 0) / 100 : 0;
+}
+
+/** Flash-family models the key can actually call, ordered: pinned first, then lite/full preference, newest first. */
+export async function geminiCandidates(key: string, hasImages: boolean): Promise<string[]> {
+  const listed = await rememberedList(`gemini:${key.slice(-6)}`, async () => {
+    const res = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", { headers: { "x-goog-api-key": key } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = (await res.json()) as { models?: { name: string; supportedGenerationMethods?: string[] }[] };
+    return (data.models ?? [])
+      .filter((m) => (m.supportedGenerationMethods ?? []).includes("generateContent"))
+      .map((m) => m.name.replace(/^models\//, ""))
+      .filter((name) => GEMINI_FLASH.test(name));
+  });
+  const pool = listed.length ? listed : GEMINI_FALLBACK;
+  const lite = pool.filter((name) => name.endsWith("-lite")).sort((a, b) => geminiVersion(b) - geminiVersion(a));
+  const full = pool.filter((name) => !name.endsWith("-lite")).sort((a, b) => geminiVersion(b) - geminiVersion(a));
+  const pin = (names: string[], pinned: string) => (names.includes(pinned) ? [pinned, ...names.filter((n) => n !== pinned)] : names);
+  const ordered = hasImages
+    ? [...pin(full, GEMINI_MODEL), ...pin(lite, GEMINI_LITE_MODEL)]
+    : [...pin(lite, GEMINI_LITE_MODEL), ...pin(full, GEMINI_MODEL)];
+  return ordered.slice(0, 4);
+}
+
+/** Groq chat models the key can call, pinned first, then the preference list, then anything vision-shaped for images. */
+export async function groqCandidates(key: string, hasImages: boolean): Promise<string[]> {
+  const listed = await rememberedList(`groq:${key.slice(-6)}`, async () => {
+    const res = await fetch("https://api.groq.com/openai/v1/models", { headers: { Authorization: `Bearer ${key}` } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = (await res.json()) as { data?: { id: string; active?: boolean }[] };
+    return (data.data ?? [])
+      .filter((m) => m.active !== false && !/whisper|tts|guard|embed|allam|orpheus|playai/i.test(m.id))
+      .map((m) => m.id);
+  });
+  if (!listed.length) return [hasImages ? GROQ_VISION_MODEL : GROQ_TEXT_MODEL];
+  if (hasImages) {
+    const vision = listed.filter((id) => GROQ_VISION_PATTERN.test(id));
+    return [GROQ_VISION_MODEL, ...vision.filter((id) => id !== GROQ_VISION_MODEL)].filter((id) => listed.includes(id) || id === GROQ_VISION_MODEL).slice(0, 3);
+  }
+  const preferred = GROQ_TEXT_PREFERENCE.filter((id) => listed.includes(id));
+  const rest = listed.filter((id) => !preferred.includes(id));
+  return [...preferred, ...rest].slice(0, 3);
+}
 
 export async function callAI(env: AIEnv, messages: AIMessage[], opts: AIOptions = {}): Promise<string> {
   const errors: string[] = [];
   const hasImages = messages.some((m) => m.images && m.images.length > 0);
-  // Separate quota buckets: don't let cron text traffic starve vision grading.
-  const geminiModels = hasImages
-    ? [GEMINI_MODEL, GEMINI_LITE_MODEL]
-    : [GEMINI_LITE_MODEL, GEMINI_MODEL];
   if (env.GEMINI_API_KEY) {
-    for (const model of geminiModels) {
+    for (const model of await geminiCandidates(env.GEMINI_API_KEY, hasImages)) {
       try {
         return await callGemini(env.GEMINI_API_KEY, messages, opts, model);
       } catch (e) {
         errors.push(`gemini/${model}: ${String(e).slice(0, 160)}`);
+        if (/HTTP 404/.test(String(e))) modelLists.delete(`gemini:${env.GEMINI_API_KEY.slice(-6)}`);
       }
     }
-  }
+  } else errors.push("gemini: no key configured");
   if (env.GROQ_API_KEY) {
-    try {
-      return await callGroq(env.GROQ_API_KEY, messages, opts);
-    } catch (e) {
-      errors.push(`groq: ${String(e).slice(0, 200)}`);
+    for (const model of await groqCandidates(env.GROQ_API_KEY, hasImages)) {
+      try {
+        return await callGroq(env.GROQ_API_KEY, messages, opts, model);
+      } catch (e) {
+        errors.push(`groq/${model}: ${String(e).slice(0, 200)}`);
+        if (/HTTP 404|decommissioned|does not exist/i.test(String(e))) modelLists.delete(`groq:${env.GROQ_API_KEY.slice(-6)}`);
+      }
     }
-  }
+  } else errors.push("groq: no key configured");
   if (env.GITHUB_MODELS_TOKEN) {
     try {
       return await callGithubModels(env.GITHUB_MODELS_TOKEN, messages, opts);
     } catch (e) {
-      errors.push(`github: ${String(e).slice(0, 200)}`);
+      errors.push(`github/${GITHUB_MODEL}: ${String(e).slice(0, 200)}`);
+    }
+  } else errors.push("github: no token configured");
+  throw new Error(`every AI provider failed — ${errors.join(" | ")}`);
+}
+
+/** Which provider answers right now, for the /ai/health diagnostic. */
+export async function probeAI(env: AIEnv): Promise<{ ok: boolean; answered_by?: string; gemini: string[]; groq: string[]; github: boolean; error?: string }> {
+  const gemini = env.GEMINI_API_KEY ? await geminiCandidates(env.GEMINI_API_KEY, false) : [];
+  const groq = env.GROQ_API_KEY ? await groqCandidates(env.GROQ_API_KEY, false) : [];
+  const attempts: { label: string; run: () => Promise<string> }[] = [];
+  const ping: AIMessage[] = [{ role: "user", text: "Reply with the single word OK." }];
+  for (const model of gemini) attempts.push({ label: `gemini/${model}`, run: () => callGemini(env.GEMINI_API_KEY!, ping, { maxTokens: 8 }, model) });
+  for (const model of groq) attempts.push({ label: `groq/${model}`, run: () => callGroq(env.GROQ_API_KEY!, ping, { maxTokens: 8 }, model) });
+  if (env.GITHUB_MODELS_TOKEN) attempts.push({ label: `github/${GITHUB_MODEL}`, run: () => callGithubModels(env.GITHUB_MODELS_TOKEN!, ping, { maxTokens: 8 }) });
+  const failures: string[] = [];
+  for (const attempt of attempts) {
+    try {
+      await attempt.run();
+      return { ok: true, answered_by: attempt.label, gemini, groq, github: Boolean(env.GITHUB_MODELS_TOKEN) };
+    } catch (e) {
+      failures.push(`${attempt.label}: ${String(e).slice(0, 120)}`);
     }
   }
-  throw new Error(errors.length ? errors.join(" | ") : "No AI provider configured");
+  return { ok: false, gemini, groq, github: Boolean(env.GITHUB_MODELS_TOKEN), error: failures.join(" | ") || "no provider configured" };
 }
 
 async function callGemini(
@@ -124,10 +215,9 @@ async function callGemini(
   return text;
 }
 
-async function callGroq(key: string, messages: AIMessage[], opts: AIOptions): Promise<string> {
-  const hasImages = messages.some((m) => m.images && m.images.length > 0);
+async function callGroq(key: string, messages: AIMessage[], opts: AIOptions, model: string): Promise<string> {
   const body = {
-    model: hasImages ? GROQ_VISION_MODEL : GROQ_TEXT_MODEL,
+    model,
     temperature: opts.temperature ?? 0.7,
     max_tokens: opts.maxTokens ?? 2048,
     ...(opts.json ? { response_format: { type: "json_object" } } : {}),

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { sign, verify } from "hono/jwt";
-import { MATE_PERSONA, callAI, parseAIJson, type AIImage, type AIMessage } from "./ai";
+import { MATE_PERSONA, callAI, parseAIJson, probeAI, type AIImage, type AIMessage } from "./ai";
 import {
   DEFAULT_PROFILE,
   getProfile,
@@ -618,7 +618,7 @@ app.post("/chat", async (c) => {
       .run();
     return c.json({ reply });
   } catch (e) {
-    return c.json({ error: `Mate couldn't reach the AI: ${String(e).slice(0, 200)}` }, 502);
+    return c.json({ error: `Mate couldn't reach the AI: ${String(e).slice(0, 900)}` }, 502);
   }
 });
 
@@ -766,7 +766,7 @@ app.post("/analyze", async (c) => {
       .run();
     return c.json({ id, analysis });
   } catch (e) {
-    return c.json({ error: `Analysis failed: ${String(e).slice(0, 200)}` }, 502);
+    return c.json({ error: `Analysis failed: ${String(e).slice(0, 900)}` }, 502);
   }
 });
 
@@ -803,9 +803,12 @@ app.post("/briefing", async (c) => {
     const briefing = await generateBriefing(c.env);
     return c.json({ briefing });
   } catch (e) {
-    return c.json({ error: `Briefing failed: ${String(e).slice(0, 200)}` }, 502);
+    return c.json({ error: `Briefing failed: ${String(e).slice(0, 900)}` }, 502);
   }
 });
+
+// Which AI provider/model answers right now, plus the discovered candidate lists.
+app.get("/ai/health", async (c) => c.json(await probeAI(c.env)));
 
 // ---------- live news watch ----------
 
@@ -821,7 +824,7 @@ app.post("/newswatch/scan", async (c) => {
     const r = await scanNews(c.env);
     return c.json(r);
   } catch (e) {
-    return c.json({ error: String(e).slice(0, 200) }, 502);
+    return c.json({ error: String(e).slice(0, 900) }, 502);
   }
 });
 
@@ -907,7 +910,7 @@ app.post("/coach/weekly", async (c) => {
     const report = await weeklyReport(c.env, Boolean(body?.refresh));
     return c.json({ report });
   } catch (e) {
-    return c.json({ error: `Report failed: ${String(e).slice(0, 200)}` }, 502);
+    return c.json({ error: `Report failed: ${String(e).slice(0, 900)}` }, 502);
   }
 });
 
