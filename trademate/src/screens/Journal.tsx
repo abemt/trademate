@@ -112,8 +112,10 @@ function TradeRow({
                 {t.lots.toFixed(2)} lots · ${t.risk_usd?.toFixed(0)} risk ({t.risk_pct}%)
               </span>
             )}
-            {t.sl_pips !== null && <span>SL {t.sl_pips} pips</span>}
+            {t.sl_pips !== null && <span>SL {t.sl_pips} pips{t.sl_price !== null && ` @ ${t.sl_price}`}</span>}
             {t.entry_price !== null && <span>entry {t.entry_price}</span>}
+            {t.tp_price !== null && <span>TP {t.tp_price}</span>}
+            {t.exit_price !== null && <span>exit {t.exit_price}</span>}
             {t.followed_plan !== null && (
               <span className={t.followed_plan ? "text-up" : "text-down"}>
                 {t.followed_plan ? "followed plan" : "broke plan"}

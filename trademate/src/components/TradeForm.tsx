@@ -37,6 +37,13 @@ interface Props {
 
 const R_CHIPS = [-1, -0.5, 0, 1, 1.5, 2, 3];
 
+/** Accepts "4,278.2" as well as "4278.2"; empty or junk → null. */
+function parsePrice(text: string): number | null {
+  if (text.trim() === "") return null;
+  const value = Number.parseFloat(text.replace(/,/g, ""));
+  return Number.isFinite(value) ? value : null;
+}
+
 /** 1–5 emoji scale for body/urge checkpoints. */
 function ScaleRow({
   value,
@@ -114,6 +121,16 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
   const [entryPrice, setEntryPrice] = useState<string>(
     existing?.entry_price != null ? String(existing.entry_price) : "",
   );
+  // The plan's invalidation price is where the idea is wrong — the default stop.
+  const [slPriceText, setSlPriceText] = useState<string>(
+    existing?.sl_price != null ? String(existing.sl_price) : lockedPlan ? String(lockedPlan.details.invalidation_price) : "",
+  );
+  const [tpPriceText, setTpPriceText] = useState<string>(
+    existing?.tp_price != null ? String(existing.tp_price) : "",
+  );
+  const [exitPriceText, setExitPriceText] = useState<string>(
+    existing?.exit_price != null ? String(existing.exit_price) : "",
+  );
   const [isClosed, setIsClosed] = useState<boolean>(
     Boolean(closeMode) || existing?.status === "closed",
   );
@@ -148,7 +165,19 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
   const [error, setError] = useState<string>("");
 
   const riskPct = riskPctOf(riskUsd, accountSize);
-  const lots = Math.max(0.01, Math.floor((riskUsd / (slPips * 10)) * 100) / 100);
+  const entryNum = parsePrice(entryPrice);
+  const slNum = parsePrice(slPriceText);
+  const tpNum = parsePrice(tpPriceText);
+  const exitNum = parsePrice(exitPriceText);
+  // Prices win over the slider. Gold: $1 = 10 pips.
+  const derivedSlPips = entryNum !== null && slNum !== null && slNum !== entryNum ? Math.round(Math.abs(entryNum - slNum) * 10) : null;
+  const stopPips = derivedSlPips ?? slPips;
+  const lots = Math.max(0.01, Math.floor((riskUsd / (stopPips * 10)) * 100) / 100);
+  const tpPips = entryNum !== null && tpNum !== null ? Math.round(Math.abs(tpNum - entryNum) * 10) : null;
+  const plannedR = tpPips !== null && stopPips > 0 ? Math.round((tpPips / stopPips) * 10) / 10 : null;
+  const wrongSideStop = Boolean(direction && entryNum !== null && slNum !== null && (direction === "long" ? slNum >= entryNum : slNum <= entryNum));
+  const wrongSideTarget = Boolean(direction && entryNum !== null && tpNum !== null && (direction === "long" ? tpNum <= entryNum : tpNum >= entryNum));
+  const exitPips = direction && entryNum !== null && exitNum !== null ? Math.round((direction === "long" ? exitNum - entryNum : entryNum - exitNum) * 10) : null;
 
   function loadPlans() {
     api<{ plans: Plan[] }>("/plans")
@@ -197,6 +226,10 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
       setError("Long or short?");
       return;
     }
+    if (wrongSideStop || wrongSideTarget) {
+      setError(`${wrongSideStop ? "Stop" : "Target"} price is on the wrong side of the entry for a ${direction}.`);
+      return;
+    }
     if (bodyBefore === null || urgeBefore === null) {
       setError("Nervous-system check first — body state and urge level are required. That's the whole point.");
       return;
@@ -231,11 +264,11 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
       entry_trigger: trigger,
       session,
       timeframe,
-      entry_price: entryPrice.trim() === "" ? null : Number.parseFloat(entryPrice) || null,
-      sl_price: existing?.sl_price ?? null,
-      tp_price: existing?.tp_price ?? null,
-      exit_price: existing?.exit_price ?? null,
-      sl_pips: slPips,
+      entry_price: entryNum,
+      sl_price: slNum,
+      tp_price: tpNum,
+      exit_price: isClosed ? exitNum : null,
+      sl_pips: stopPips,
       lots,
       risk_usd: riskUsd,
       risk_pct: riskPct,
@@ -483,28 +516,53 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
         <FieldLabel>Risk — of the ${accountSize.toLocaleString(undefined, { maximumFractionDigits: 0 })} account size</FieldLabel>
         <RiskInput base={accountSize} riskUsd={riskUsd} onChange={setRiskUsd} />
         <p className="mt-2 text-xs text-ink-400">
-          <span className="font-semibold text-gold-300">{lots.toFixed(2)} lots</span> · {riskPct}% · ${Math.round(riskUsd * 100) / 100} at risk at {slPips} pips
+          <span className="font-semibold text-gold-300">{lots.toFixed(2)} lots</span> · {riskPct}% · ${Math.round(riskUsd * 100) / 100} at risk at {stopPips} pips
+          {derivedSlPips !== null && <span className="text-ink-300"> · from your prices</span>}
         </p>
-        <label className="mt-2 block text-xs text-ink-300">
-          Stop loss: <span className="font-semibold text-white">{slPips} pips</span>
-          <input
-            type="range"
-            min={20}
-            max={150}
-            step={5}
-            value={slPips}
-            onChange={(e) => setSlPips(Number(e.target.value))}
-            className="mt-1 w-full accent-(--color-gold-400)"
-          />
-        </label>
-        <input
-          type="text"
-          inputMode="decimal"
-          value={entryPrice}
-          onChange={(e) => setEntryPrice(e.target.value)}
-          placeholder="Entry price (optional)"
-          className="mt-2 w-full rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60"
-        />
+        {derivedSlPips === null && (
+          <label className="mt-2 block text-xs text-ink-300">
+            Stop loss: <span className="font-semibold text-white">{slPips} pips</span>
+            <input
+              type="range"
+              min={20}
+              max={150}
+              step={5}
+              value={slPips}
+              onChange={(e) => setSlPips(Number(e.target.value))}
+              className="mt-1 w-full accent-(--color-gold-400)"
+            />
+          </label>
+        )}
+        <div className="mt-2 grid grid-cols-3 gap-2">
+          {([
+            ["Entry", entryPrice, setEntryPrice],
+            ["Stop price", slPriceText, setSlPriceText],
+            ["Target price", tpPriceText, setTpPriceText],
+          ] as const).map(([label, value, set]) => (
+            <label key={label} className="block text-[10px] font-semibold uppercase tracking-wider text-ink-400">
+              {label}
+              <input
+                type="text"
+                inputMode="decimal"
+                value={value}
+                onChange={(e) => set(e.target.value)}
+                placeholder="—"
+                className="mt-1 w-full min-w-0 rounded-xl border border-white/10 bg-ink-800 px-3 py-2.5 text-sm normal-case tracking-normal text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60"
+              />
+            </label>
+          ))}
+        </div>
+        {(wrongSideStop || wrongSideTarget) && (
+          <p className="mt-1.5 text-xs text-down">
+            {wrongSideStop ? "Stop" : "Target"} is on the wrong side of the entry for a {direction}.
+          </p>
+        )}
+        {plannedR !== null && !wrongSideStop && !wrongSideTarget && (
+          <p className={`mt-1.5 text-xs ${plannedR < 2 ? "text-down" : "text-ink-300"}`}>
+            Target {tpPips} pips · <span className="font-semibold">{plannedR}R</span>
+            {plannedR < 2 && " — under 2R. The rule says skip."}
+          </p>
+        )}
       </div>
 
       {!closeMode && existing?.status !== "closed" && (
@@ -543,6 +601,20 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
             placeholder="P&L in $ (e.g. -50 or 120)"
             className="mt-2 w-full rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60"
           />
+          <input
+            type="text"
+            inputMode="decimal"
+            value={exitPriceText}
+            onChange={(e) => setExitPriceText(e.target.value)}
+            placeholder="Exit price (optional)"
+            className="mt-2 w-full rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60"
+          />
+          {exitPips !== null && (
+            <p className="mt-1.5 text-xs text-ink-400">
+              {exitPips >= 0 ? "+" : ""}{exitPips} pips · ≈ ${Math.round(exitPips * lots * 10)} gross at {lots.toFixed(2)} lots
+              {stopPips > 0 && ` · ${Math.round((exitPips / stopPips) * 10) / 10}R by price`}
+            </p>
+          )}
           <div className="mt-3">
             <FieldLabel>Did you follow your plan?</FieldLabel>
             <div className="grid grid-cols-2 gap-2">
