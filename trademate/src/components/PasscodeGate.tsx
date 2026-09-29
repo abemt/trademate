@@ -14,12 +14,15 @@ export function PasscodeGate() {
     e.preventDefault();
     if (!passcode || busy) return;
     setBusy(true);
-    const ok = await login(passcode);
+    const result = await login(passcode);
     setBusy(false);
-    if (!ok) {
+    if (result === "wrong") {
       setError("That's not it. Try again.");
       setAttempt((n) => n + 1);
       setPasscode("");
+    } else if (result === "offline") {
+      // Keep what was typed: the passcode wasn't rejected, the request never got an answer.
+      setError("Couldn't reach TradeMate. Check your connection and try again.");
     }
   }
 

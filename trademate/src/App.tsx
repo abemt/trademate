@@ -120,6 +120,28 @@ export default function App() {
   }, []);
 
   if (auth === "checking") return <Splash />;
+  if (auth === "offline") return <Offline onRetry={() => void checkAuth()} />;
   if (auth === "locked") return <PasscodeGate />;
   return <Shell />;
+}
+
+function Offline({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="flex min-h-dvh flex-col items-center justify-center gap-4 px-6 text-center">
+      <img src="/icon.svg" alt="" className="h-16 w-16 rounded-2xl opacity-70" />
+      <p className="text-lg font-semibold text-white">
+        Trade<span className="text-gold-400">Mate</span>
+      </p>
+      <p className="max-w-xs text-sm text-ink-300">
+        Couldn't reach the server. Your session is probably fine — check the connection and try again.
+      </p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="mt-2 rounded-xl bg-gold-500 px-6 py-2.5 font-semibold text-ink-950 transition hover:bg-gold-400"
+      >
+        Retry
+      </button>
+    </div>
+  );
 }

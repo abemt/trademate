@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { api } from "./api";
+import { ApiError, api } from "./api";
 import { cachedTrades, createTrade, fetchMergedTrades, flushQueue, queueUpsert } from "./sync";
 import type { Account, Trade } from "./trades";
 import type { EntryGateState } from "../../shared/entryGate";
@@ -55,7 +55,8 @@ export interface Profile {
 export const TABS = ["today", "analyze", "chart", "mate", "journal", "stats"] as const;
 export type Tab = (typeof TABS)[number];
 
-type AuthState = "checking" | "locked" | "authed";
+type AuthState = "checking" | "locked" | "authed" | "offline";
+export type LoginResult = "ok" | "wrong" | "offline";
 
 interface AppState {
   auth: AuthState;
@@ -81,7 +82,7 @@ interface AppState {
   setLogFormOpen: (open: boolean) => void;
   setPrefill: (prefill: Partial<Trade> | null) => void;
   checkAuth: () => Promise<void>;
-  login: (passcode: string) => Promise<boolean>;
+  login: (passcode: string) => Promise<LoginResult>;
   loadProfile: () => Promise<void>;
   loadAccounts: () => Promise<void>;
   addAccount: (a: { label: string; type: string; starting_balance: number }) => Promise<void>;
@@ -191,6 +192,7 @@ export const useApp = create<AppState>((set, get) => ({
   setPrefill: (prefill) => set({ prefill }),
 
   checkAuth: async () => {
+    set({ auth: "checking" });
     try {
       const r = await api<{ authed: boolean }>("/auth/me");
       if (r.authed) {
@@ -203,7 +205,8 @@ export const useApp = create<AppState>((set, get) => ({
         set({ auth: "locked" });
       }
     } catch {
-      set({ auth: "locked" });
+      // Network failure or server error: the session may well be fine, so don't demand the passcode.
+      set({ auth: "offline" });
     }
   },
 
@@ -215,9 +218,9 @@ export const useApp = create<AppState>((set, get) => ({
       void get().loadAccounts();
       void get().loadTrades();
       void get().loadUrges();
-      return true;
-    } catch {
-      return false;
+      return "ok";
+    } catch (failure) {
+      return failure instanceof ApiError && failure.status === 401 ? "wrong" : "offline";
     }
   },
 
