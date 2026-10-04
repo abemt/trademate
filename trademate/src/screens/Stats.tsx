@@ -1186,8 +1186,8 @@ export function Stats() {
 
       <MonthCalendar trades={trades} maxPerDay={maxPerDay} />
 
-      {/* Cards flow into height-balanced columns (2 on lg, 3 on xl) instead of two fixed stacks. */}
-      <div className="space-y-4 lg:columns-2 lg:gap-4 lg:space-y-0 lg:[&>*]:mb-4 lg:[&>*]:break-inside-avoid xl:columns-3">
+      {/* Standard dashboard grid: rows fill left to right, cards in a row share a height. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
       <Card title="Equity curve" icon={<IconTrendUp />} badge="cumulative $">
         {s.equity.length > 2 ? (
           <EquityCurve points={s.equity} />
@@ -1198,15 +1198,15 @@ export function Stats() {
 
       <DisciplineTriangle trades={trades} maxPerDay={maxPerDay} />
 
-      <GateCard trades={trades} />
-
       <NervousSystemCard trades={trades} />
 
-      <MonthlyProgress trades={trades} />
+      <GateCard trades={trades} />
 
       <MistakesCostCard trades={trades} />
 
       <EntryHourCard trades={trades} timezone={timezone} />
+
+      <MonthlyProgress trades={trades} />
 
       <WeeklyReviewCard />
 

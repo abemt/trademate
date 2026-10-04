@@ -567,21 +567,26 @@ export function Today() {
     <div className="space-y-4">
       <Greeting now={now} />
       <DashboardStats />
-      {/* Cards flow into height-balanced columns (2 on lg, 3 on xl) so no column runs long while another sits empty. */}
-      <div className="space-y-4 lg:columns-2 lg:gap-4 lg:space-y-0 lg:[&>*]:mb-4 lg:[&>*]:break-inside-avoid xl:columns-3">
-        <RecentTrades />
+      {/* Standard dashboard grid: rows fill left to right, cards in a row share a height. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
         <DayPlanCard />
         <TradeTokens />
-        <CircuitBreakerCard />
-        <BriefingCard />
-        <RoutineCard />
-        <DayStructureCard />
-        <CheckinCard />
-        <NewsWatchCard />
+        <div className="flex flex-col lg:row-span-2 [&>section]:flex-1">
+          <DayStructureCard />
+        </div>
+        <RecentTrades />
         <UrgeLogCard />
+        <RoutineCard />
+        <CheckinCard />
         <RiskCalc />
-        <SessionClock now={now} />
+        <BriefingCard />
+        <NewsWatchCard />
         <DisciplineCard />
+        {/* Guardrails lead on the phone; on desktop they sit with the other short status cards. */}
+        <div className="order-first flex flex-col lg:order-none [&>section]:flex-1">
+          <CircuitBreakerCard />
+        </div>
+        <SessionClock now={now} />
         {isProp && <PropGuard />}
       </div>
     </div>
