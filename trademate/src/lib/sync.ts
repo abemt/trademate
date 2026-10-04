@@ -2,11 +2,12 @@ import { api } from "./api";
 import type { Trade } from "./trades";
 
 /** Wire format: array fields serialized as JSON strings (match D1 columns). */
-type TradeRow = Omit<Trade, "emotions" | "screenshots" | "confluences" | "mistakes"> & {
+type TradeRow = Omit<Trade, "emotions" | "screenshots" | "confluences" | "mistakes" | "gate"> & {
   emotions: string;
   screenshots: string;
   confluences: string;
   mistakes: string;
+  gate: string;
 };
 
 const QUEUE_KEY = "tm_sync_queue_v1";
@@ -19,6 +20,7 @@ function toRow(t: Trade): TradeRow {
     screenshots: JSON.stringify(t.screenshots),
     confluences: JSON.stringify(t.confluences ?? []),
     mistakes: JSON.stringify(t.mistakes ?? []),
+    gate: JSON.stringify(t.gate ?? []),
   };
 }
 
@@ -38,6 +40,8 @@ function fromRow(r: TradeRow): Trade {
     screenshots: parseArr(r.screenshots),
     confluences: parseArr(r.confluences),
     mistakes: parseArr(r.mistakes),
+    gate: parseArr(r.gate),
+    gate_score: r.gate_score ?? null,
   };
 }
 

@@ -27,6 +27,107 @@ import {
   type Breakdown,
   type Trade,
 } from "../lib/trades";
+import { GATE_LINES } from "../../shared/gate";
+
+/** A+ (7/7) against half-setups, and the price of every missing line. */
+function GateCard({ trades }: { trades: Trade[] }) {
+  const closed = trades.filter((t) => !t.deleted && t.status === "closed" && t.pnl_usd !== null);
+  const graded = closed.filter((t) => t.gate_score !== null && t.gate_score !== undefined);
+  const bucket = (list: Trade[]) => ({
+    n: list.length,
+    wins: list.filter((t) => (t.pnl_usd ?? 0) > 0).length,
+    netR: list.reduce((sum, t) => sum + (t.r_multiple ?? 0), 0),
+    netUsd: list.reduce((sum, t) => sum + (t.pnl_usd ?? 0), 0),
+  });
+  const aplus = bucket(graded.filter((t) => (t.gate_score ?? 0) >= GATE_LINES.length));
+  const half = bucket(graded.filter((t) => (t.gate_score ?? 0) < GATE_LINES.length));
+  const missing = GATE_LINES.map((line) => {
+    const list = graded.filter((t) => !t.gate.includes(line.id));
+    return { line, ...bucket(list) };
+  }).filter((row) => row.n > 0).sort((a, b) => a.netUsd - b.netUsd);
+  const maxAbs = Math.max(1, ...missing.map((row) => Math.abs(row.netUsd)));
+
+  return (
+    <Card title="A+ gate" icon={<IconGauge />} badge={graded.length ? `${aplus.n} A+ · ${half.n} half` : "seven lines"}>
+      {graded.length === 0 ? (
+        <p className="text-sm leading-relaxed text-ink-300">
+          Every new ticket answers the seven lines. From here on this card splits your trades into A+ (7/7) and
+          half-setups, and puts a price on each missing line. The trades you take without the gate are the ones
+          this card is for.
+        </p>
+      ) : (
+        <>
+          <div className="mb-3 grid grid-cols-2 gap-2">
+            {[["A+ · 7/7", aplus, "text-up"], ["Half-setups", half, "text-down"]].map(([label, b, tone]) => {
+              const bk = b as ReturnType<typeof bucket>;
+              return (
+                <div key={label as string} className="rounded-xl border border-white/10 bg-ink-800 p-3">
+                  <p className={`text-[10px] font-bold uppercase tracking-wider ${tone as string}`}>{label as string}</p>
+                  <p className="mt-1 text-lg font-bold text-white">{bk.n} <span className="text-xs font-semibold text-ink-400">trade{bk.n === 1 ? "" : "s"}</span></p>
+                  <p className="text-xs text-ink-300">{bk.n ? `${Math.round((bk.wins / bk.n) * 100)}% win · ${fmtR(bk.netR)} · ${fmtUsd(bk.netUsd)}` : "—"}</p>
+                </div>
+              );
+            })}
+          </div>
+          {missing.length > 0 && (
+            <>
+              <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-ink-400">What each missing line cost</p>
+              <ul className="space-y-2">
+                {missing.map((row) => (
+                  <li key={row.line.id}>
+                    <div className="mb-0.5 flex items-baseline justify-between gap-2 text-xs">
+                      <span className="truncate text-ink-200">{row.line.n}. {row.line.label} <span className="text-[10px] text-ink-400">· {row.n}×</span></span>
+                      <span className={`shrink-0 font-bold ${row.netUsd < 0 ? "text-down" : "text-up"}`}>{fmtUsd(row.netUsd)}</span>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-ink-700">
+                      <div className={`h-full rounded-full ${row.netUsd < 0 ? "bg-down/70" : "bg-up/70"}`} style={{ width: `${Math.max(4, (Math.abs(row.netUsd) / maxAbs) * 100)}%` }} />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
+/** Where in the day the money went — entries bucketed by local hour. */
+function EntryHourCard({ trades, timezone }: { trades: Trade[]; timezone: string }) {
+  const closed = trades.filter((t) => !t.deleted && t.status === "closed" && t.pnl_usd !== null);
+  const fmt = useMemo(() => new Intl.DateTimeFormat("en-GB", { timeZone: timezone, hour: "2-digit", hour12: false }), [timezone]);
+  const buckets = new Map<number, { n: number; wins: number; netUsd: number }>();
+  for (const t of closed) {
+    const hour = Number(fmt.format(new Date(t.opened_at))) % 24;
+    const b = buckets.get(hour) ?? { n: 0, wins: 0, netUsd: 0 };
+    b.n++;
+    if ((t.pnl_usd ?? 0) > 0) b.wins++;
+    b.netUsd += t.pnl_usd ?? 0;
+    buckets.set(hour, b);
+  }
+  const rows = [...buckets.entries()].sort((a, b) => a[0] - b[0]);
+  const maxAbs = Math.max(1, ...rows.map(([, b]) => Math.abs(b.netUsd)));
+  return (
+    <Card title="By entry hour" icon={<IconClock />} badge={timezone.split("/").pop()?.replace("_", " ") ?? timezone}>
+      {rows.length === 0 ? (
+        <p className="text-sm text-ink-300">Closed trades land here by the hour you entered them.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {rows.map(([hour, b]) => (
+            <li key={hour} className="flex items-center gap-2 text-xs">
+              <span className="w-10 shrink-0 font-semibold text-ink-300">{String(hour).padStart(2, "0")}:00</span>
+              <div className="h-2 flex-1 overflow-hidden rounded-full bg-ink-700">
+                <div className={`h-full rounded-full ${b.netUsd < 0 ? "bg-down/70" : "bg-up/70"}`} style={{ width: `${Math.max(3, (Math.abs(b.netUsd) / maxAbs) * 100)}%` }} />
+              </div>
+              <span className="w-24 shrink-0 text-right text-ink-400">{b.wins}W {b.n - b.wins}L · <span className={`font-bold ${b.netUsd < 0 ? "text-down" : b.netUsd > 0 ? "text-up" : "text-ink-300"}`}>{fmtUsd(b.netUsd)}</span></span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
 
 function StatCard({
   label,
@@ -1030,6 +1131,7 @@ export function Stats() {
     [allTrades, active?.id],
   );
   const maxPerDay = useApp((s) => s.profile?.max_trades_per_day) ?? 2;
+  const timezone = useApp((s) => s.profile?.timezone) ?? "Africa/Addis_Ababa";
   const s = useMemo(() => computeStats(trades, maxPerDay), [trades, maxPerDay]);
 
   if (s.closedCount === 0 && trades.length === 0) {
@@ -1104,7 +1206,11 @@ export function Stats() {
 
       <NervousSystemCard trades={trades} />
 
+      <GateCard trades={trades} />
+
       <MistakesCostCard trades={trades} />
+
+      <EntryHourCard trades={trades} timezone={timezone} />
 
       <PlanPerformanceCard trades={trades} />
 

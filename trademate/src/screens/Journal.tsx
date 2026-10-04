@@ -16,6 +16,7 @@ import {
   optionLabel,
   type Trade,
 } from "../lib/trades";
+import { GATE_LINES, gateLabel } from "../../shared/gate";
 
 function dayLabel(key: string): string {
   const today = localDateKey(new Date().toISOString());
@@ -97,7 +98,14 @@ function TradeRow({
               <span className="text-ink-300"> · {optionLabel(TRIGGERS, t.entry_trigger)}</span>
             )}
           </span>
-          <span className="block text-xs text-ink-400">{meta}</span>
+          <span className="block text-xs text-ink-400">
+            {meta}
+            {t.gate_score !== null && t.gate_score !== undefined && (
+              <span className={`ml-2 rounded-full border px-1.5 py-px text-[10px] font-bold ${t.gate_score >= GATE_LINES.length ? "border-up/40 text-up" : "border-down/40 text-down"}`}>
+                {t.gate_score >= GATE_LINES.length ? "A+" : `½ ${t.gate_score}/${GATE_LINES.length}`}
+              </span>
+            )}
+          </span>
           {t.entry_mode === "unplanned" && <span className="block text-xs font-semibold text-down">Unplanned entry - rule violation</span>}
         </span>
         <PnlBadge t={t} />
@@ -116,6 +124,9 @@ function TradeRow({
             {t.entry_price !== null && <span>entry {t.entry_price}</span>}
             {t.tp_price !== null && <span>TP {t.tp_price}</span>}
             {t.exit_price !== null && <span>exit {t.exit_price}</span>}
+            {t.gate_score !== null && t.gate_score !== undefined && (
+              <span className={t.gate_score >= GATE_LINES.length ? "text-up" : "text-down"}>{gateLabel(t.gate, t.gate_score)}</span>
+            )}
             {t.followed_plan !== null && (
               <span className={t.followed_plan ? "text-up" : "text-down"}>
                 {t.followed_plan ? "followed plan" : "broke plan"}

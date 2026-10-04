@@ -14,6 +14,8 @@ import { pushAll } from "./push";
 import { entryGateRoutes, guardTradeWrites } from "./entryGate";
 import { URGE_OUTCOMES, validateUrge, type UrgeOutcome } from "../shared/urges";
 import { isReadCall, isReadTrend, readConflict, structureOnlyProblem, type DayPlan } from "../shared/biasCall";
+import { GATE_LINES, normalizeGate } from "../shared/gate";
+import { validateHabit } from "../shared/habits";
 import { dailyBars, scoreDayPlans, spotPrice } from "./price";
 
 const COOKIE = "tm_session";
@@ -119,6 +121,7 @@ const TRADE_FIELDS = [
   "account_id", "feeling_note", "setup_grade", "execution_quality", "confluences", "mistakes",
   "plan_id", "plan_setup", "plan_entry", "lesson",
   "entry_plan_id", "entry_mode", "unplanned_reason",
+  "gate", "gate_score",
 ] as const;
 
 const UPSERT_TRADE_SQL = `
@@ -155,6 +158,20 @@ function cleanTrade(x: Record<string, unknown>): Record<string, unknown> | null 
     return "[]";
   };
   const now = new Date().toISOString();
+  // Gate: an array from the ticket is normalized and scored; a stored JSON string round-trips (offline queue); otherwise never graded.
+  let gate = "[]";
+  let gateScore: number | null = null;
+  if (Array.isArray(x.gate)) {
+    const passed = normalizeGate(x.gate);
+    gate = JSON.stringify(passed);
+    gateScore = passed.length;
+  } else if (typeof x.gate === "string") {
+    let parsed: unknown = null;
+    try { parsed = JSON.parse(x.gate); } catch { parsed = null; }
+    const passed = normalizeGate(parsed);
+    gate = JSON.stringify(passed);
+    gateScore = typeof x.gate_score === "number" && Number.isInteger(x.gate_score) && x.gate_score >= 0 && x.gate_score <= GATE_LINES.length ? x.gate_score : null;
+  }
   return {
     id: x.id,
     instrument: str(x.instrument, 20) ?? "XAUUSD",
@@ -204,6 +221,8 @@ function cleanTrade(x: Record<string, unknown>): Record<string, unknown> | null 
     entry_plan_id: str(x.entry_plan_id, 64),
     entry_mode: x.entry_mode === "unplanned" ? "unplanned" : "planned",
     unplanned_reason: str(x.unplanned_reason, 2000),
+    gate,
+    gate_score: gateScore,
   };
 }
 
@@ -900,6 +919,57 @@ app.patch("/urges/:id", async (c) => {
   const saved = await c.env.DB.prepare("SELECT * FROM urge_log WHERE id = ?").bind(c.req.param("id")).first();
   if (!saved) return c.json({ error: "Not found" }, 404);
   return c.json({ urge: saved });
+});
+
+// ---------- day structure (habits) ----------
+
+app.get("/habits", async (c) => {
+  const days = Math.min(90, Math.max(1, Number(c.req.query("days")) || 14));
+  const since = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+  const [habits, ticks] = await c.env.DB.batch([
+    c.env.DB.prepare("SELECT * FROM habits ORDER BY archived ASC, sort ASC, created_at ASC"),
+    c.env.DB.prepare("SELECT * FROM habit_days WHERE date >= ? ORDER BY date ASC").bind(since),
+  ]);
+  return c.json({ habits: habits.results, days: ticks.results });
+});
+
+app.put("/habits", async (c) => {
+  const body = await c.req.json<unknown>().catch(() => null);
+  try {
+    const habit = validateHabit(body);
+    const now = new Date().toISOString();
+    await c.env.DB.prepare(
+      `INSERT INTO habits (id, label, kind, time_hint, sort, archived, created_at, updated_at) VALUES (?,?,?,?,?,0,?,?)
+       ON CONFLICT(id) DO UPDATE SET label=excluded.label, kind=excluded.kind, time_hint=excluded.time_hint, sort=excluded.sort, updated_at=excluded.updated_at`,
+    ).bind(habit.id, habit.label, habit.kind, habit.time_hint, habit.sort, now, now).run();
+    const saved = await c.env.DB.prepare("SELECT * FROM habits WHERE id = ?").bind(habit.id).first();
+    return c.json({ habit: saved });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Could not save." }, 400);
+  }
+});
+
+app.patch("/habits/:id", async (c) => {
+  const body = await c.req.json<{ archived?: unknown }>().catch(() => null);
+  if (body?.archived !== 0 && body?.archived !== 1) return c.json({ error: "archived must be 0 or 1" }, 400);
+  await c.env.DB.prepare("UPDATE habits SET archived = ?, updated_at = ? WHERE id = ?")
+    .bind(body.archived, new Date().toISOString(), c.req.param("id")).run();
+  const saved = await c.env.DB.prepare("SELECT * FROM habits WHERE id = ?").bind(c.req.param("id")).first();
+  if (!saved) return c.json({ error: "Not found" }, 404);
+  return c.json({ habit: saved });
+});
+
+app.put("/habits/days", async (c) => {
+  const body = await c.req.json<{ date?: unknown; habit_id?: unknown; done?: unknown }>().catch(() => null);
+  if (!body || !/^\d{4}-\d{2}-\d{2}$/.test(String(body.date))) return c.json({ error: "date required" }, 400);
+  if (typeof body.habit_id !== "string" || !/^[\w-]{1,64}$/.test(body.habit_id)) return c.json({ error: "habit required" }, 400);
+  if (body.done !== 0 && body.done !== 1) return c.json({ error: "done must be 0 or 1" }, 400);
+  const exists = await c.env.DB.prepare("SELECT id FROM habits WHERE id = ?").bind(body.habit_id).first();
+  if (!exists) return c.json({ error: "Not found" }, 404);
+  await c.env.DB.prepare(
+    "INSERT INTO habit_days (date, habit_id, done, updated_at) VALUES (?,?,?,?) ON CONFLICT(date, habit_id) DO UPDATE SET done = excluded.done, updated_at = excluded.updated_at",
+  ).bind(body.date, body.habit_id, body.done, new Date().toISOString()).run();
+  return c.json({ day: { date: body.date, habit_id: body.habit_id, done: body.done } });
 });
 
 // ---------- weekly coach report ----------

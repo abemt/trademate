@@ -53,6 +53,9 @@ export interface Trade {
   entry_plan_id?: string | null;
   entry_mode?: "planned" | "unplanned" | null;
   unplanned_reason?: string | null;
+  /** A+ gate: ids of the seven lines that passed at entry; score 7 = A+, null = never graded. */
+  gate: string[];
+  gate_score: number | null;
 }
 
 export interface Account {

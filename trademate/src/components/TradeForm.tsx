@@ -11,6 +11,7 @@ import { RiskInput, riskPctOf } from "./RiskInput";
 import { useEntryGate } from "../lib/useEntryGate";
 import { ENTRY_SETUPS, planBlock, type EntryPlan } from "../../shared/entryGate";
 import { lineCrossed, type DayPlan } from "../../shared/biasCall";
+import { GATE_LINES, GATE_MAX_STOP_PIPS, autoGateLines, gateLabel, type GateLineId } from "../../shared/gate";
 import {
   BODY_SCALE,
   CONFLUENCES,
@@ -162,6 +163,8 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
   const [autopilot, setAutopilot] = useState<number | null>(
     existing?.autopilot ?? prefill?.autopilot ?? null,
   );
+  // Lines 1-4 of the A+ gate are his word; the rest the ticket works out.
+  const [gateWord, setGateWord] = useState<GateLineId[]>([]);
   const [error, setError] = useState<string>("");
 
   const riskPct = riskPctOf(riskUsd, accountSize);
@@ -178,6 +181,17 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
   const wrongSideStop = Boolean(direction && entryNum !== null && slNum !== null && (direction === "long" ? slNum >= entryNum : slNum <= entryNum));
   const wrongSideTarget = Boolean(direction && entryNum !== null && tpNum !== null && (direction === "long" ? tpNum <= entryNum : tpNum >= entryNum));
   const exitPips = direction && entryNum !== null && exitNum !== null ? Math.round((direction === "long" ? exitNum - entryNum : entryNum - exitNum) * 10) : null;
+  const autoGate = autoGateLines({ plannedR, stopPips, urgeBefore, tradesToday: gate.state ? gate.state.trade_count : null });
+  const gatePassed: GateLineId[] = existing
+    ? (existing.gate as GateLineId[])
+    : GATE_LINES.map((line) => line.id).filter((id) => {
+        if (id === "target") return autoGate.target;
+        if (id === "state") return autoGate.state;
+        if (id === "first") return autoGate.first;
+        if (id === "stop") return gateWord.includes(id) && !autoGate.stopTooWide;
+        return gateWord.includes(id);
+      });
+  const gateScoreNow = existing ? existing.gate_score : gatePassed.length;
 
   function loadPlans() {
     api<{ plans: Plan[] }>("/plans")
@@ -305,6 +319,8 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
       entry_plan_id: existing?.entry_plan_id ?? lockedPlan?.id ?? null,
       entry_mode: existing ? existing.entry_mode : violation ? "unplanned" : "planned",
       unplanned_reason: violation ? unplannedReason.trim() : null,
+      gate: gatePassed,
+      gate_score: gateScoreNow,
     };
     setSaving(true);
     setError("");
@@ -564,6 +580,63 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
           </p>
         )}
       </div>
+
+      {existing ? (
+        existing.gate_score !== null && (
+          <p className={`text-xs font-semibold ${existing.gate_score >= GATE_LINES.length ? "text-up" : "text-down"}`}>
+            Gate at entry: {gateLabel(existing.gate, existing.gate_score)}
+          </p>
+        )
+      ) : (
+        <div className={`rounded-2xl border p-3.5 ${gateScoreNow === GATE_LINES.length ? "border-up/40 bg-up/5" : "border-down/30 bg-down/5"}`}>
+          <div className="mb-1 flex items-baseline justify-between gap-2">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-gold-400">A+ gate · all seven or no trade</p>
+            <p className={`text-xs font-bold ${gateScoreNow === GATE_LINES.length ? "text-up" : "text-down"}`}>{gateLabel(gatePassed, gateScoreNow)}</p>
+          </div>
+          <p className="mb-3 text-[11px] leading-snug text-ink-400">
+            Tap the lines that are true. The last three the ticket checks for you. A half-setup still saves — the record keeps the missing numbers.
+          </p>
+          <ul className="space-y-1.5">
+            {GATE_LINES.map((line) => {
+              const passed = gatePassed.includes(line.id);
+              const stopBlocked = line.id === "stop" && autoGate.stopTooWide;
+              const detail =
+                line.id === "target" ? (tpNum === null ? "type the target price" : plannedR !== null ? `${plannedR}R` : null)
+                : line.id === "state" ? (urgeBefore === null ? "answer the urge check" : `urge ${urgeBefore}`)
+                : line.id === "first" ? (gate.state ? `${gate.state.trade_count} taken today` : "can't reach the server")
+                : stopBlocked ? `${stopPips} pips — over ${GATE_MAX_STOP_PIPS}, the rule says skip`
+                : null;
+              const row = (
+                <>
+                  <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold ${passed ? "border-up bg-up/20 text-up" : "border-ink-500 text-ink-500"}`}>
+                    {passed ? "✓" : line.n}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className={`block text-sm ${passed ? "text-ink-200" : "text-white"}`}>{line.label}</span>
+                    <span className="block text-[10px] text-ink-400">{detail ?? line.hint}</span>
+                  </span>
+                  {line.auto && <span className="text-[9px] font-bold uppercase tracking-wider text-ink-500">auto</span>}
+                </>
+              );
+              return (
+                <li key={line.id}>
+                  {line.auto || stopBlocked ? (
+                    <div className={`flex w-full items-start gap-3 rounded-xl border px-3 py-2 text-left ${passed ? "border-up/30 bg-up/5" : "border-white/10 bg-ink-800"}`}>{row}</div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => toggleIn(gateWord, (next) => setGateWord(next as GateLineId[]), line.id)}
+                      className={`flex w-full items-start gap-3 rounded-xl border px-3 py-2 text-left transition ${passed ? "border-up/30 bg-up/5" : "border-white/10 bg-ink-800 hover:border-gold-500/40"}`}
+                    >
+                      {row}
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       {!closeMode && existing?.status !== "closed" && (
         <div>

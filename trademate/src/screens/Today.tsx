@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { Card } from "../components/Card";
 import { SitOutControl } from "../components/EntryGate";
 import { UrgeLogCard } from "../components/UrgeCatch";
+import { DayStructureCard } from "../components/DayStructureCard";
 import { tradingDate } from "../../shared/entryGate";
 import {
   IconClock,
@@ -578,6 +579,7 @@ export function Today() {
           <CircuitBreakerCard />
           <DayPlanCard />
           <RoutineCard />
+          <DayStructureCard />
           <CheckinCard />
           <TradeTokens />
           <UrgeLogCard />

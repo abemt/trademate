@@ -2,6 +2,8 @@ import { MATE_PERSONA, callAI, type AIMessage } from "./ai";
 import type { EntryPlanInput } from "../shared/entryGate";
 import { summarizeUrges, type UrgeEntry } from "../shared/urges";
 import { READ_TRENDS, isReadCall, lineCrossed, summarizeReads, type DayPlan } from "../shared/biasCall";
+import { GATE_LINES, gateLabel } from "../shared/gate";
+import { habitLines, type Habit, type HabitDay } from "../shared/habits";
 import { spotPrice } from "./price";
 
 export interface Env {
@@ -80,12 +82,14 @@ interface TradeRow {
   plan_entry: string | null;
   lesson: string | null;
   mistakes: string | null;
+  gate?: string | null;
+  gate_score?: number | null;
 }
 
 export async function recentTrades(env: Env, limit = 15, accountId?: string): Promise<TradeRow[]> {
   try {
     const r = await env.DB.prepare(
-      "SELECT opened_at, direction, setup_type, session, status, pnl_usd, r_multiple, emotions, followed_plan, notes, body_before, urge_before, autopilot, feeling_note, plan_setup, plan_entry, lesson, mistakes FROM trades WHERE deleted = 0 AND (? IS NULL OR COALESCE(account_id, 'acc-legacy') = ?) ORDER BY opened_at DESC LIMIT ?",
+      "SELECT opened_at, direction, setup_type, session, status, pnl_usd, r_multiple, emotions, followed_plan, notes, body_before, urge_before, autopilot, feeling_note, plan_setup, plan_entry, lesson, mistakes, gate, gate_score FROM trades WHERE deleted = 0 AND (? IS NULL OR COALESCE(account_id, 'acc-legacy') = ?) ORDER BY opened_at DESC LIMIT ?",
     )
       .bind(accountId ?? null, accountId ?? null, limit)
       .all();
@@ -108,6 +112,11 @@ export function tradeLines(trades: TradeRow[]): string {
     ];
     if (t.body_before != null || t.urge_before != null)
       bits.push(`body:${t.body_before ?? "?"}/5 urge:${t.urge_before ?? "?"}/5`);
+    if (t.gate_score != null) {
+      let passed: unknown = [];
+      try { passed = JSON.parse(t.gate ?? "[]"); } catch { passed = []; }
+      bits.push(`gate:${gateLabel(Array.isArray(passed) ? (passed as string[]) : [], t.gate_score)}`);
+    }
     if (t.autopilot === 1) bits.push("AUTOPILOT-TOOK-OVER");
     if (t.plan_setup) bits.push(`his-plan:"${t.plan_setup.slice(0, 70)}"`);
     if (t.plan_entry) bits.push(`waited-for:"${t.plan_entry.slice(0, 70)}"`);
@@ -135,6 +144,20 @@ export async function urgeLines(env: Env, days = 14): Promise<string> {
     return `Autopilot catch log (last ${days} days): ${s.total} logged — walked away ${s.resisted}, acted ${s.acted}, still open ${s.pending}${s.catchRate !== null ? ` (catch rate ${s.catchRate}%)` : ""}. By area: ${Object.entries(s.byDomain).map(([k, v]) => `${k} ${v}`).join(", ")}.${s.topSentence ? ` Most common permission sentence: "${s.topSentence.text}" (${s.topSentence.count}x).` : ""}\n${recent.join("\n")}`;
   } catch {
     return "Autopilot catch log unavailable.";
+  }
+}
+
+/** The day's shape: habits ticked today, the week's rate, streaks. */
+export async function habitBlock(env: Env, today: string): Promise<string> {
+  try {
+    const since = new Date(Date.parse(`${today}T00:00:00Z`) - 13 * 86_400_000).toISOString().slice(0, 10);
+    const [habits, days] = await env.DB.batch([
+      env.DB.prepare("SELECT * FROM habits WHERE archived = 0 ORDER BY sort ASC"),
+      env.DB.prepare("SELECT * FROM habit_days WHERE date >= ?").bind(since),
+    ]);
+    return habitLines(habits.results as unknown as Habit[], days.results as unknown as HabitDay[], today);
+  } catch {
+    return "Day structure unavailable.";
   }
 }
 
@@ -312,6 +335,7 @@ export async function traderContext(env: Env): Promise<string> {
   }
 
   const urgeBlock = await urgeLines(env);
+  const habitsBlock = await habitBlock(env, today);
 
   return `TRADER CONTEXT (live from his journal, newest first)
 Name: ${profile.trader_name} · Timezone: ${tz} · Instrument: ${profile.instrument}
@@ -324,6 +348,7 @@ His marked zones: ${zonesLine}
 ${checkinLine}
 Nervous system: ${nervousLine}
 ${urgeBlock}
+${habitsBlock}
 Recent trades P&L (last ${closed.length} closed): ${recentPnl >= 0 ? "+" : ""}$${Math.round(recentPnl)}
 Recent trades (HISTORY — includes previous days, check each date):
 ${tradeLines(trades)}
@@ -339,9 +364,11 @@ HIS CURRENT CONTRACT (LIVE — the numbers come from his profile and OVERRIDE an
 1. The account's job is REPS, not compounding. Success = rule-compliant trades; balance is irrelevant.
 2. Plan BEFORE entry, every time: bias, direction (must not contradict the bias), playbook setup, the three things he must see, and the invalidation price are written and saved before the order. No plan, no trade. An entry logged without a prior plan is a rule break even if it wins. No trade is owed to the market. Place broker protection as required by the trading plan; TradeMate does not place broker orders. The MORNING READ is locked before the session and names the daily structure, one call (bullish / bearish / no trade) and the price that proves it wrong — written from price only, never from news. He trades only in the direction of his read; if his line is crossed the read is dead and he may only trade the new direction with a fresh plan. A no-trade call on a choppy day that he then sits out is a WIN.
 3. MAX ${profile.max_trades_per_day} trade(s) per day — this number is his CURRENT rule.${Number(profile.max_trades_per_day) === 1 ? " One loss = done for the day." : ""}
-4. SL moves to break-even ONLY after a new structure point confirms beyond entry on a 15-MINUTE CLOSE — never from fear, never on a wick.
-5. Red-flag sentences — call them out the moment you hear them: "one last $10", "one more try", "I'll win it back", "one loss won't take me anywhere", "it's basically there" / a "half" setup, or wanting to deposit right after a blowup. That is Autopilot talking, not him.
-6. The loop he is breaking (it shows up in trading, in Rainbow Six and in daily life): cue -> permission sentence -> Autopilot acts -> regret. His job is to NOTICE and log it in the catch log before acting. When he reports an urge, name the loop, point at his own catch count, and tell him to step away for five minutes — the urge peaks and passes. A logged urge he walked away from is a rep won, whatever the market did afterwards.`;
+4. THE A+ GATE (his own, Oct 2026): ${GATE_LINES.map((line) => `${line.n} ${line.label}`).join("; ")}. A trade shows gate:A+ 7/7 or gate:Half-setup n/7 with the missing line numbers. 7/7 is the only trade he agreed to take; a half-setup belongs in the Notebook as a shadow, not in the market. Judge a trade by its gate, never by its P&L — a half-setup that paid is still the most expensive trade he can take. Lines 1-3 are his own word; call it out if the feeling note or reason contradicts them.
+5. SL moves to break-even ONLY after a new structure point confirms beyond entry on a 15-MINUTE CLOSE — never from fear, never on a wick.
+6. Red-flag sentences — call them out the moment you hear them: "one last $10", "one more try", "I'll win it back", "one loss won't take me anywhere", "it's basically there" / a "half" setup, or wanting to deposit right after a blowup. That is Autopilot talking, not him.
+7. The loop he is breaking (it shows up in trading, in Rainbow Six and in daily life): cue -> permission sentence -> Autopilot acts -> regret. His job is to NOTICE and log it in the catch log before acting. When he reports an urge, name the loop, point at his own catch count, and tell him to step away for five minutes — the urge peaks and passes. A logged urge he walked away from is a rep won, whatever the market did afterwards. After ANY closed trade the day is over: log, bank, close the platform, leave the room — the win ends the day as much as the loss does.
+8. The day structure above is his, not yours: a ticked day is what keeps him away from the chart in the empty hours. When he is at the chart with nothing to do, point at the work block and the body block before you discuss price.`;
 }
 
 export async function askMate(
