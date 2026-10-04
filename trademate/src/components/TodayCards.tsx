@@ -6,7 +6,7 @@ import { api } from "../lib/api";
 import { useApp } from "../lib/store";
 import { accountTrades, localDateKey, type Trade } from "../lib/trades";
 import { tradingDate } from "../../shared/entryGate";
-import { READ_CALLS, READ_TRENDS, lineCrossed, readConflict, structureOnlyProblem, summarizeReads, type DayPlan } from "../../shared/biasCall";
+import { READ_CALLS, READ_TRENDS, canResolve, isDecidedCall, lineCrossed, readConflict, structureOnlyProblem, summarizeReads, type DayPlan } from "../../shared/biasCall";
 
 function useNowTick(ms = 30_000): Date {
   const [now, setNow] = useState(() => new Date());
@@ -319,12 +319,14 @@ const READ_STYLE: Record<string, string> = {
   bullish: "border-up/50 bg-up/10 text-up",
   bearish: "border-down/50 bg-down/10 text-down",
   no_trade: "border-gold-500/40 bg-gold-500/10 text-gold-300",
+  waiting: "border-white/20 bg-ink-800 text-ink-200",
 };
 
 const RESULT_STYLE: Record<string, string> = {
   right: "bg-up",
   wrong: "bg-down",
   flat: "bg-ink-500",
+  waited: "bg-ink-700 ring-1 ring-ink-500",
 };
 
 function readLabel(bias: string | null): string {
@@ -351,7 +353,7 @@ function ReadScorecard({ plans, price }: { plans: DayPlan[]; price: number | nul
         <p className="text-[11px] font-semibold uppercase tracking-wider text-ink-400">Read scorecard · last {card.scored}</p>
         <p className="text-xs font-bold text-white">
           {card.pct !== null ? `${card.pct}% right` : "no decided days yet"}
-          <span className="font-normal text-ink-400"> · {card.right}R {card.wrong}W {card.flat}F</span>
+          <span className="font-normal text-ink-400"> · {card.right}R {card.wrong}W {card.flat}F{card.waited ? ` · ${card.waited} waited` : ""}</span>
         </p>
       </div>
       <div className="mt-2 flex items-center gap-1">
@@ -396,14 +398,19 @@ export function DayPlanCard() {
   const [invalidationPrice, setInvalidationPrice] = useState("");
   const [noTrade, setNoTrade] = useState("");
   const [review, setReview] = useState("");
+  const [scenarioBull, setScenarioBull] = useState("");
+  const [scenarioBear, setScenarioBear] = useState("");
+  const [resolving, setResolving] = useState(false);
+  const [resolutionNote, setResolutionNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [price, setPrice] = useState<number | null>(null);
 
   const today = localDateKey(new Date().toISOString());
   const locked = Boolean(existing?.called_at);
-  const newsWord = structureOnlyProblem(narrative) ?? structureOnlyProblem(invalidation);
-  const conflict = locked ? null : readConflict(trend, bias);
+  const waiting = Boolean(existing && canResolve(existing));
+  const newsWord = structureOnlyProblem(narrative) ?? structureOnlyProblem(invalidation) ?? structureOnlyProblem(scenarioBull) ?? structureOnlyProblem(scenarioBear) ?? structureOnlyProblem(resolutionNote);
+  const conflict = locked && !resolving ? null : readConflict(trend, bias);
 
   function hydrate(plan: DayPlan | null) {
     setExisting(plan);
@@ -416,6 +423,8 @@ export function DayPlanCard() {
     setInvalidationPrice(plan.invalidation_price !== null ? String(plan.invalidation_price) : "");
     setNoTrade(plan.no_trade ?? "");
     setReview(plan.review ?? "");
+    setScenarioBull(plan.scenario_bull ?? "");
+    setScenarioBear(plan.scenario_bear ?? "");
   }
 
   useEffect(() => {
@@ -435,11 +444,15 @@ export function DayPlanCard() {
           date: today, bias, trend, narrative: narrative.trim() || null, must_see: mustSee.trim() || null,
           invalidation: invalidation.trim() || null, invalidation_price: invalidationPrice.trim() || null,
           no_trade: noTrade.trim() || null, review: review.trim() || null,
+          scenario_bull: scenarioBull.trim() || null, scenario_bear: scenarioBear.trim() || null,
+          resolution_note: resolving ? resolutionNote.trim() || null : null,
         }),
       });
       hydrate(r.plan);
       setHistory((list) => [r.plan, ...list.filter((plan) => plan.date !== r.plan.date)]);
       setEditing(false);
+      setResolving(false);
+      setResolutionNote("");
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : "Not saved — try again.");
     } finally {
@@ -451,9 +464,75 @@ export function DayPlanCard() {
 
   const crossed = existing ? lineCrossed(existing.bias, existing.invalidation_price, price) : false;
 
-  if (existing && locked && !editing) {
+  if (existing && locked && resolving) {
+    const decided = isDecidedCall(bias);
     return (
-      <Card title="Morning read" icon={<IconSpark />} badge={`locked ${existing.called_at!.slice(11, 16)} UTC`}>
+      <Card title="Price showed its hand — call it" icon={<IconSpark />} badge={`waiting since ${existing.called_at!.slice(11, 16)} UTC`}>
+        <p className="mb-3 text-[11px] leading-snug text-ink-400">
+          You wrote both scenarios this morning. Which one fired? The call is graded from this moment; the time you showed up stays on the record.
+        </p>
+        <div className="space-y-1.5 text-sm text-ink-200">
+          {existing.scenario_bull && <p><span className="font-semibold text-up">Bullish if:</span> {existing.scenario_bull}</p>}
+          {existing.scenario_bear && <p><span className="font-semibold text-down">Bearish if:</span> {existing.scenario_bear}</p>}
+        </div>
+        <div className="mt-3">
+          <FieldLabel>Daily structure now</FieldLabel>
+          <ChipRow>
+            {READ_TRENDS.map((option) => (
+              <Chip key={option.id} active={trend === option.id} onClick={() => setTrend(option.id)}>{option.label}</Chip>
+            ))}
+          </ChipRow>
+        </div>
+        <div className="mt-3">
+          <FieldLabel>The call</FieldLabel>
+          <ChipRow>
+            {READ_CALLS.filter((call) => call.id !== "waiting").map((call) => (
+              <Chip key={call.id} active={bias === call.id} onClick={() => setBias(call.id)}>{call.label}</Chip>
+            ))}
+          </ChipRow>
+          {conflict && <p role="alert" className="mt-1.5 rounded-xl border border-down/40 bg-down/10 p-2.5 text-xs text-down">{conflict}</p>}
+        </div>
+        <div className="mt-3">
+          <FieldLabel>What price did to show its hand — structure only</FieldLabel>
+          <input
+            type="text"
+            value={resolutionNote}
+            onChange={(e) => setResolutionNote(e.target.value)}
+            placeholder='"1H closed below the weekly low at 4 111 and retested it from underneath"'
+            className={`w-full rounded-xl border bg-ink-800 px-3.5 py-2.5 text-sm text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60 ${newsWord ? "border-down/60" : "border-white/10"}`}
+          />
+          {newsWord && <p role="alert" className="mt-1 text-xs text-down">Structure only. Delete "{newsWord}" and write what price did.</p>}
+        </div>
+        {bias !== "no_trade" && (
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <FieldLabel>The price that proves me wrong</FieldLabel>
+              <input type="text" inputMode="decimal" value={invalidationPrice} onChange={(e) => setInvalidationPrice(e.target.value)} placeholder={bias === "bearish" ? "4 230" : "4 100"} className="w-full rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60" />
+            </div>
+            <div>
+              <FieldLabel>Because…</FieldLabel>
+              <input type="text" value={invalidation} onChange={(e) => setInvalidation(e.target.value)} placeholder='"1H close back above the low"' className="w-full rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60" />
+            </div>
+          </div>
+        )}
+        {error && <p role="alert" className="mt-2 text-xs text-down">{error}</p>}
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={saving || Boolean(newsWord) || Boolean(conflict) || !decided || !trend || resolutionNote.trim().length < 8 || (bias !== "no_trade" && invalidationPrice.trim() === "")}
+          className="mt-3 w-full rounded-xl bg-gold-500 py-2.5 font-semibold text-ink-950 transition hover:bg-gold-400 disabled:opacity-40"
+        >
+          {saving ? "Saving…" : "Call it — graded from now"}
+        </button>
+        <button type="button" onClick={() => { setResolving(false); setBias(existing.bias); setTrend(existing.trend); setError(""); }} className="mt-2 w-full text-[11px] text-ink-400 hover:text-ink-200">Still waiting — back</button>
+      </Card>
+    );
+  }
+
+  if (existing && locked && !editing) {
+    const showedUp = existing.waited_from ? existing.waited_from.slice(11, 16) : null;
+    return (
+      <Card title="Morning read" icon={<IconSpark />} badge={waiting ? `waiting since ${existing.called_at!.slice(11, 16)} UTC` : showedUp ? `showed up ${showedUp} · called ${existing.called_at!.slice(11, 16)} UTC` : `locked ${existing.called_at!.slice(11, 16)} UTC`}>
         <div className="flex flex-wrap items-center gap-2">
           <span className={`inline-block rounded-full border px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide ${READ_STYLE[existing.bias ?? ""] ?? "border-white/15 bg-ink-800 text-ink-200"}`}>
             {readLabel(existing.bias)}
@@ -468,6 +547,9 @@ export function DayPlanCard() {
         )}
         <div className="mt-2 space-y-1.5 text-sm text-ink-200">
           {existing.narrative && <p><span className="font-semibold text-ink-400">The chart shows:</span> {existing.narrative}</p>}
+          {waiting && existing.scenario_bull && <p><span className="font-semibold text-up">Bullish if:</span> {existing.scenario_bull}</p>}
+          {waiting && existing.scenario_bear && <p><span className="font-semibold text-down">Bearish if:</span> {existing.scenario_bear}</p>}
+          {existing.resolution_note && <p><span className="font-semibold text-ink-400">Price showed its hand:</span> {existing.resolution_note}</p>}
           {existing.invalidation_price !== null && !crossed && (
             <p><span className="font-semibold text-ink-400">Wrong {existing.bias === "bullish" ? "below" : "above"}:</span> {fmtPrice(existing.invalidation_price)}{existing.invalidation ? ` — ${existing.invalidation}` : ""}</p>
           )}
@@ -476,6 +558,16 @@ export function DayPlanCard() {
           {existing.no_trade && <p><span className="font-semibold text-down">I sit out if:</span> {existing.no_trade}</p>}
           {existing.review && <p className="border-t border-white/5 pt-1.5 italic text-ink-300">Review: {existing.review}</p>}
         </div>
+        {waiting && (
+          <>
+            <p className="mt-2 rounded-xl border border-gold-500/30 bg-gold-500/10 p-2.5 text-xs text-gold-300">
+              No direction yet — no trades until you call it. When one scenario fires on a closed candle, call it here; the grade starts from that moment.
+            </p>
+            <button type="button" onClick={() => { setResolving(true); setBias(null); setInvalidationPrice(""); setInvalidation(""); setError(""); }} className="mt-2.5 w-full rounded-xl bg-gold-500 py-2.5 text-sm font-semibold text-ink-950 transition hover:bg-gold-400">
+              Price showed its hand — call it ›
+            </button>
+          </>
+        )}
         <button type="button" onClick={() => setEditing(true)} className="mt-2.5 text-[11px] font-bold text-gold-500 hover:text-gold-400">
           {existing.review ? "Edit the review ›" : "Add end-of-day review ›"}
         </button>
@@ -515,6 +607,30 @@ export function DayPlanCard() {
             />
             {newsWord && <p role="alert" className="mt-1 text-xs text-down">Structure only. Delete "{newsWord}" and write what price did. The news is already in the candles.</p>}
           </div>
+          {bias === "waiting" ? (
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <FieldLabel>It turns bullish if…</FieldLabel>
+                <input
+                  type="text"
+                  value={scenarioBull}
+                  onChange={(e) => setScenarioBull(e.target.value)}
+                  placeholder='"the weekly low at 4 111 is rejected and the 1H closes back above 4 145 — target the swing high"'
+                  className="w-full rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60"
+                />
+              </div>
+              <div>
+                <FieldLabel>It turns bearish if…</FieldLabel>
+                <input
+                  type="text"
+                  value={scenarioBear}
+                  onChange={(e) => setScenarioBear(e.target.value)}
+                  placeholder='"the 1H closes below 4 111 — sell the retest of the broken low"'
+                  className="w-full rounded-xl border border-white/10 bg-ink-800 px-3.5 py-2.5 text-sm text-white placeholder:text-ink-400 outline-none focus:border-gold-500/60"
+                />
+              </div>
+            </div>
+          ) : (
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <FieldLabel>{bias === "no_trade" ? "Price that would change my mind" : "The price that proves me wrong"}</FieldLabel>
@@ -538,6 +654,7 @@ export function DayPlanCard() {
               />
             </div>
           </div>
+          )}
         </>
       )}
       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -578,12 +695,12 @@ export function DayPlanCard() {
       <button
         type="button"
         onClick={() => void save()}
-        disabled={saving || Boolean(newsWord) || Boolean(conflict) || (!locked && (!bias || !trend || narrative.trim().length < 8 || (bias !== "no_trade" && invalidationPrice.trim() === "")))}
+        disabled={saving || Boolean(newsWord) || Boolean(conflict) || (!locked && (!bias || !trend || narrative.trim().length < 8 || (bias === "waiting" ? scenarioBull.trim().length < 8 || scenarioBear.trim().length < 8 : bias !== "no_trade" && invalidationPrice.trim() === "")))}
         className="mt-3 w-full rounded-xl bg-gold-500 py-2.5 font-semibold text-ink-950 transition hover:bg-gold-400 disabled:opacity-40"
       >
-        {saving ? "Saving…" : locked ? "Save review" : "Lock the read"}
+        {saving ? "Saving…" : locked ? "Save review" : bias === "waiting" ? "Lock it as waiting" : "Lock the read"}
       </button>
-      {!locked && <p className="mt-1.5 text-center text-[11px] text-ink-400">Locks with the live price. Graded tomorrow. Only the must-see, sit-out and review lines stay editable.</p>}
+      {!locked && <p className="mt-1.5 text-center text-[11px] text-ink-400">{bias === "waiting" ? "Locks the time you showed up. Call it from this card when a scenario fires; the grade starts at the call." : "Locks with the live price. Graded tomorrow. Only the must-see, sit-out and review lines stay editable."}</p>}
       {locked && <button type="button" onClick={() => setEditing(false)} className="mt-2 w-full text-[11px] text-ink-400 hover:text-ink-200">Back</button>}
     </Card>
   );

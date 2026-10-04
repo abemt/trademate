@@ -13,7 +13,7 @@ import { generateBriefing, scanNews, weeklyReport } from "./market";
 import { pushAll } from "./push";
 import { entryGateRoutes, guardTradeWrites } from "./entryGate";
 import { URGE_OUTCOMES, validateUrge, type UrgeOutcome } from "../shared/urges";
-import { isReadCall, isReadTrend, readConflict, structureOnlyProblem, type DayPlan } from "../shared/biasCall";
+import { canResolve, isDecidedCall, isReadCall, isReadTrend, readConflict, structureOnlyProblem, type DayPlan } from "../shared/biasCall";
 import { GATE_LINES, normalizeGate } from "../shared/gate";
 import { validateHabit } from "../shared/habits";
 import { dailyBars, scoreDayPlans, spotPrice } from "./price";
@@ -260,7 +260,7 @@ app.get("/dayplan/history", async (c) => {
 
 app.post("/dayplan", async (c) => {
   const b = await c.req
-    .json<{ date?: string; bias?: string; trend?: string; narrative?: string; must_see?: string; invalidation?: string; invalidation_price?: unknown; no_trade?: string; review?: string }>()
+    .json<{ date?: string; bias?: string; trend?: string; narrative?: string; must_see?: string; invalidation?: string; invalidation_price?: unknown; no_trade?: string; review?: string; scenario_bull?: string; scenario_bear?: string; resolution_note?: string }>()
     .catch(() => null);
   if (!b?.date || !/^\d{4}-\d{2}-\d{2}$/.test(b.date)) return c.json({ error: "date required" }, 400);
   const s = (v: unknown, max: number) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
@@ -274,31 +274,61 @@ app.post("/dayplan", async (c) => {
   let invalidationPrice = typeof rawLine === "number" && Number.isFinite(rawLine) && rawLine > 0 ? Math.round(rawLine * 100) / 100 : null;
   let priceAtCall = existing?.price_at_call ?? null;
   let calledAt = existing?.called_at ?? null;
-  if (locked && existing) {
+  let scenarioBull = s(b.scenario_bull, 1000);
+  let scenarioBear = s(b.scenario_bear, 1000);
+  let waitedFrom = existing?.waited_from ?? null;
+  let resolutionNote = existing?.resolution_note ?? null;
+  const resolving = locked && existing && canResolve(existing) && isDecidedCall(bias);
+  if (locked && existing && !resolving) {
     // The read is a commitment: once locked, only the must-see, sit-out and review lines can change.
     bias = existing.bias; trend = existing.trend; narrative = existing.narrative;
     invalidation = existing.invalidation; invalidationPrice = existing.invalidation_price;
+    scenarioBull = existing.scenario_bull ?? null; scenarioBear = existing.scenario_bear ?? null;
+  } else if (resolving && existing) {
+    // Price showed its hand: the waiting read becomes a call, graded from this moment; the time he showed up is kept.
+    const note = s(b.resolution_note, 1000);
+    const newsWord = structureOnlyProblem(note) ?? structureOnlyProblem(invalidation);
+    if (newsWord) return c.json({ error: `Structure only. Delete "${newsWord}" and write what price did.` }, 400);
+    if (!note || note.length < 8) return c.json({ error: "Write what price did to show its hand (a sentence is enough)." }, 400);
+    trend = trend ?? existing.trend;
+    const conflict = readConflict(trend, bias);
+    if (conflict) return c.json({ error: conflict }, 400);
+    if (bias !== "no_trade" && invalidationPrice === null) return c.json({ error: "Write the price that proves this call wrong. A call without a line is a hope." }, 400);
+    narrative = existing.narrative;
+    scenarioBull = existing.scenario_bull ?? null; scenarioBear = existing.scenario_bear ?? null;
+    waitedFrom = existing.waited_from ?? existing.called_at;
+    resolutionNote = note;
+    calledAt = new Date().toISOString();
+    priceAtCall = (await spotPrice(c.env)).price;
   } else {
-    const newsWord = structureOnlyProblem(narrative) ?? structureOnlyProblem(invalidation);
+    const newsWord = structureOnlyProblem(narrative) ?? structureOnlyProblem(invalidation) ?? structureOnlyProblem(scenarioBull) ?? structureOnlyProblem(scenarioBear);
     if (newsWord) return c.json({ error: `Structure only. Delete "${newsWord}" and write what price did: the swings, the level, the trigger. The news is already in the candles.` }, 400);
     if (isReadCall(bias)) {
       if (!trend) return c.json({ error: "Name the daily structure first: higher highs, lower lows, or overlapping." }, 400);
       const conflict = readConflict(trend, bias);
       if (conflict) return c.json({ error: conflict }, 400);
       if (!narrative || narrative.length < 8) return c.json({ error: "Write what the chart shows (a sentence is enough)." }, 400);
-      if (bias !== "no_trade" && invalidationPrice === null) return c.json({ error: "Write the price that proves this read wrong. A read without a line is a hope." }, 400);
+      if (bias === "waiting") {
+        if (!scenarioBull || scenarioBull.length < 8 || !scenarioBear || scenarioBear.length < 8) {
+          return c.json({ error: "Waiting means both scenarios are written now: what makes it bullish, what makes it bearish. Then you call it when one fires." }, 400);
+        }
+        invalidationPrice = null;
+      } else if (bias !== "no_trade" && invalidationPrice === null) {
+        return c.json({ error: "Write the price that proves this read wrong. A read without a line is a hope." }, 400);
+      }
       calledAt = new Date().toISOString();
       priceAtCall = (await spotPrice(c.env)).price;
     }
   }
   await c.env.DB.prepare(
-    `INSERT INTO day_plans (date, bias, trend, narrative, must_see, invalidation, invalidation_price, no_trade, review, price_at_call, called_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+    `INSERT INTO day_plans (date, bias, trend, narrative, must_see, invalidation, invalidation_price, no_trade, review, price_at_call, called_at, scenario_bull, scenario_bear, waited_from, resolution_note, updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
      ON CONFLICT(date) DO UPDATE SET bias=excluded.bias, trend=excluded.trend, narrative=excluded.narrative, must_see=excluded.must_see,
        invalidation=excluded.invalidation, invalidation_price=excluded.invalidation_price, no_trade=excluded.no_trade, review=excluded.review,
-       price_at_call=excluded.price_at_call, called_at=excluded.called_at, updated_at=excluded.updated_at`,
+       price_at_call=excluded.price_at_call, called_at=excluded.called_at, scenario_bull=excluded.scenario_bull, scenario_bear=excluded.scenario_bear,
+       waited_from=excluded.waited_from, resolution_note=excluded.resolution_note, updated_at=excluded.updated_at`,
   )
-    .bind(b.date, bias, trend, narrative, s(b.must_see, 2000), invalidation, invalidationPrice, s(b.no_trade, 1000), s(b.review, 2000), priceAtCall, calledAt)
+    .bind(b.date, bias, trend, narrative, s(b.must_see, 2000), invalidation, invalidationPrice, s(b.no_trade, 1000), s(b.review, 2000), priceAtCall, calledAt, scenarioBull, scenarioBear, waitedFrom, resolutionNote)
     .run();
   const plan = await c.env.DB.prepare("SELECT * FROM day_plans WHERE date = ?").bind(b.date).first<DayPlan>();
   return c.json({ ok: true, plan, locked: Boolean(plan?.called_at) });

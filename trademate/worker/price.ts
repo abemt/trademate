@@ -70,7 +70,7 @@ export async function scoreDayPlans(env: Env, now = new Date()): Promise<number>
   const today = localDate(String(profile.timezone ?? "Africa/Addis_Ababa"), now);
   const utcToday = now.toISOString().slice(0, 10);
   const { results } = await env.DB.prepare(
-    "SELECT date, bias, price_at_call, invalidation_price FROM day_plans WHERE scored_at IS NULL AND price_at_call IS NOT NULL AND bias IN ('bullish','bearish','no_trade') AND date < ? ORDER BY date ASC LIMIT 30",
+    "SELECT date, bias, price_at_call, invalidation_price FROM day_plans WHERE scored_at IS NULL AND price_at_call IS NOT NULL AND bias IN ('bullish','bearish','no_trade','waiting') AND date < ? ORDER BY date ASC LIMIT 30",
   ).bind(today).all<Pick<DayPlan, "date" | "bias" | "price_at_call" | "invalidation_price">>();
   if (!results.length) return 0;
   const bars = await dailyBars(env);

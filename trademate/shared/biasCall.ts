@@ -4,8 +4,11 @@ export const READ_CALLS = [
   { id: "bullish", label: "Bullish", hint: "I only look for longs" },
   { id: "bearish", label: "Bearish", hint: "I only look for shorts" },
   { id: "no_trade", label: "No trade", hint: "Choppy / no edge — sitting out is the trade" },
+  { id: "waiting", label: "Waiting", hint: "Price hasn't shown its hand. I write both scenarios now and call it when one fires — no trades until then." },
 ] as const;
 export type ReadCall = (typeof READ_CALLS)[number]["id"];
+/** The calls that give the day a direction (or an explicit sit-out); "waiting" is the state before one of these. */
+export const DECIDED_CALLS: readonly ReadCall[] = ["bullish", "bearish", "no_trade"];
 
 export const READ_TRENDS = [
   { id: "up", label: "Higher highs & higher lows" },
@@ -14,7 +17,7 @@ export const READ_TRENDS = [
 ] as const;
 export type ReadTrend = (typeof READ_TRENDS)[number]["id"];
 
-export type ReadResult = "right" | "wrong" | "flat";
+export type ReadResult = "right" | "wrong" | "flat" | "waited";
 
 export interface DayPlan {
   date: string;
@@ -35,6 +38,11 @@ export interface DayPlan {
   atr: number | null;
   result: ReadResult | null;
   invalidated: number;
+  /** Waiting read: the two scenarios written before the session, and the moment he showed up. */
+  scenario_bull?: string | null;
+  scenario_bear?: string | null;
+  waited_from?: string | null;
+  resolution_note?: string | null;
 }
 
 export interface DailyBar { date: string; open: number; high: number; low: number; close: number }
@@ -50,6 +58,15 @@ export function structureOnlyProblem(text: string | null | undefined): string | 
 
 export function isReadCall(value: unknown): value is ReadCall {
   return READ_CALLS.some((call) => call.id === value);
+}
+
+export function isDecidedCall(value: unknown): value is Exclude<ReadCall, "waiting"> {
+  return DECIDED_CALLS.includes(value as ReadCall) && value !== "waiting";
+}
+
+/** A locked "waiting" read is the only read that may still change: into a decided call, once price shows its hand. */
+export function canResolve(plan: Pick<DayPlan, "bias" | "called_at"> | null | undefined): boolean {
+  return Boolean(plan?.called_at) && plan?.bias === "waiting";
 }
 
 export function isReadTrend(value: unknown): value is ReadTrend {
@@ -94,6 +111,7 @@ export function scoreRead(input: {
   if (input.call === "bullish") result = move >= 0.2 * unit ? "right" : move <= -0.2 * unit ? "wrong" : "flat";
   else if (input.call === "bearish") result = move <= -0.2 * unit ? "right" : move >= 0.2 * unit ? "wrong" : "flat";
   else if (input.call === "no_trade") result = Math.abs(move) <= 0.35 * unit ? "right" : Math.abs(move) >= 0.7 * unit ? "wrong" : "flat";
+  else if (input.call === "waiting") result = "waited";
   const line = input.invalidationPrice;
   const invalidated = line !== null && Number.isFinite(line) && (
     (input.call === "bullish" && input.bar.low <= line) || (input.call === "bearish" && input.bar.high >= line)
@@ -112,6 +130,8 @@ export interface ReadScorecard {
   right: number;
   wrong: number;
   flat: number;
+  /** Showed up, wrote both scenarios, never called it. Neither right nor wrong. */
+  waited: number;
   invalidated: number;
   /** Right as a share of decided (non-flat) reads. */
   pct: number | null;
@@ -122,21 +142,23 @@ export function summarizeReads(plans: Pick<DayPlan, "date" | "result" | "invalid
   const scored = plans.filter((plan) => plan.result !== null).sort((a, b) => b.date.localeCompare(a.date));
   const right = scored.filter((plan) => plan.result === "right").length;
   const wrong = scored.filter((plan) => plan.result === "wrong").length;
-  const flat = scored.length - right - wrong;
+  const waited = scored.filter((plan) => plan.result === "waited").length;
+  const flat = scored.length - right - wrong - waited;
   const decided = right + wrong;
   let streak: ReadScorecard["streak"] = null;
-  const firstDecided = scored.find((plan) => plan.result !== "flat");
+  const undecided = (result: ReadResult | null) => result === "flat" || result === "waited";
+  const firstDecided = scored.find((plan) => !undecided(plan.result));
   if (firstDecided) {
     let length = 0;
     for (const plan of scored) {
-      if (plan.result === "flat") continue;
+      if (undecided(plan.result)) continue;
       if (plan.result !== firstDecided.result) break;
       length++;
     }
     streak = { result: firstDecided.result as ReadResult, length };
   }
   return {
-    scored: scored.length, right, wrong, flat,
+    scored: scored.length, right, wrong, flat, waited,
     invalidated: scored.filter((plan) => plan.invalidated).length,
     pct: decided ? Math.round((100 * right) / decided) : null,
     streak,

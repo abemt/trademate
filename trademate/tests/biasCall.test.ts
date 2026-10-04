@@ -63,6 +63,63 @@ test("scorecard counts decided reads, flat days and crossed lines, and knows the
   assert.deepEqual([card.scored, card.right, card.wrong, card.flat, card.invalidated, card.pct], [4, 1, 2, 1, 2, 33]);
   assert.deepEqual(card.streak, { result: "wrong", length: 2 });
   assert.equal(summarizeReads([]).pct, null);
+  const waited = summarizeReads([
+    { date: "2026-10-06", result: "waited", invalidated: 0 },
+    { date: "2026-10-05", result: "right", invalidated: 0 },
+  ]);
+  assert.deepEqual([waited.scored, waited.waited, waited.flat, waited.pct, waited.streak], [2, 1, 0, 100, { result: "right", length: 1 }], "a waited day is neither right nor wrong and does not break a streak");
+  assert.equal(scoreRead({ call: "waiting", priceAtCall: 4300, invalidationPrice: null, bar: { close: 4200, high: 4310, low: 4190 }, atr: 40 }).result, "waited");
+});
+
+test("API: a waiting read needs both scenarios, blocks nothing but a direction, and becomes a call graded from the moment he calls it", async () => {
+  const { db, env } = fixture();
+  env.TWELVEDATA_API_KEY = "test-key";
+  const realFetch = globalThis.fetch;
+  let spot = 4300.5;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("/price?")) return new Response(JSON.stringify({ price: String(spot) }));
+    return realFetch(input);
+  }) as typeof fetch;
+  try {
+    const call = await authedFetch(env);
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Addis_Ababa" }).format(new Date());
+    const half = await call("/dayplan", { method: "POST", body: { date: today, bias: "waiting", trend: "down", narrative: "closed the week on its low, deciding point", scenario_bear: "1H close below 4111, sell the retest" } });
+    assert.equal(half.status, 400, "one scenario is not a waiting read");
+    assert.match((await half.json()).error, /both scenarios/);
+    const locked = await call("/dayplan", { method: "POST", body: { date: today, bias: "waiting", trend: "down", narrative: "closed the week on its low, deciding point", scenario_bull: "low rejected and 1H closes back above 4145, target the swing high", scenario_bear: "1H close below 4111, sell the retest" } });
+    assert.equal(locked.status, 200, await locked.clone().text());
+    const waitingPlan = (await locked.json()).plan;
+    assert.equal(waitingPlan.bias, "waiting");
+    assert.ok(waitingPlan.called_at && waitingPlan.price_at_call === 4300.5 && waitingPlan.invalidation_price === null);
+    let context = await traderContext(env);
+    assert.match(context, /MORNING READ: WAITING since/);
+    assert.match(context, /BEARISH if "1H close below 4111/);
+    // Still waiting: the review line may change, the scenarios may not.
+    const edited = (await (await call("/dayplan", { method: "POST", body: { date: today, bias: "waiting", trend: "down", narrative: "x", scenario_bull: "changed", scenario_bear: "changed", review: "sat on my hands" } })).json()).plan;
+    assert.deepEqual([edited.scenario_bull.slice(0, 12), edited.review], ["low rejected", "sat on my hands"]);
+    // Price shows its hand: the call needs a reason, a line, and no conflict with the structure he names now.
+    spot = 4105;
+    assert.equal((await call("/dayplan", { method: "POST", body: { date: today, bias: "bearish", trend: "down", resolution_note: "1H closed below 4111 and retested it from underneath" } })).status, 400, "a call without a line is refused");
+    assert.equal((await call("/dayplan", { method: "POST", body: { date: today, bias: "bullish", trend: "down", resolution_note: "it bounced a bit", invalidation_price: 4100 } })).status, 400, "a call against the named structure is refused");
+    const called = await call("/dayplan", { method: "POST", body: { date: today, bias: "bearish", trend: "down", resolution_note: "1H closed below 4111 and retested it from underneath", invalidation_price: 4150, invalidation: "1H close back above the low" } });
+    assert.equal(called.status, 200, await called.clone().text());
+    const resolved = (await called.json()).plan;
+    assert.equal(resolved.bias, "bearish");
+    assert.equal(resolved.price_at_call, 4105, "graded from the call, not from the morning");
+    assert.equal(resolved.waited_from, waitingPlan.called_at, "the time he showed up is kept");
+    assert.ok(Date.parse(resolved.called_at) >= Date.parse(waitingPlan.called_at));
+    assert.equal(resolved.scenario_bear, "1H close below 4111, sell the retest");
+    // Now it is a locked call like any other.
+    const flipped = (await (await call("/dayplan", { method: "POST", body: { date: today, bias: "bullish", trend: "up", resolution_note: "changed my mind", invalidation_price: 4000 } })).json()).plan;
+    assert.deepEqual([flipped.bias, flipped.invalidation_price], ["bearish", 4150]);
+    context = await traderContext(env);
+    assert.match(context, /showed up \d\d:\d\d UTC and WAITED/);
+    assert.match(context, /: BEARISH/);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM day_plans").get()!.n, 1);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
 
 test("API: a read locks with the live price, rejects news, ignores later edits to the call, and is graded from the next day", async () => {

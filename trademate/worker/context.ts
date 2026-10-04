@@ -287,9 +287,13 @@ export async function traderContext(env: Env): Promise<string> {
       .first<DayPlan>();
     if (dp) {
       const p: string[] = [];
-      if (dp.called_at && isReadCall(dp.bias)) {
+      if (dp.called_at && dp.bias === "waiting") {
         const trend = READ_TRENDS.find((option) => option.id === dp.trend)?.label ?? "structure not named";
-        p.push(`MORNING READ locked at ${dp.called_at.slice(11, 16)} UTC${dp.price_at_call ? ` with spot ${dp.price_at_call}` : ""}: ${dp.bias === "no_trade" ? "NO TRADE (choppy / no edge)" : dp.bias!.toUpperCase()} — daily structure ${trend}`);
+        p.push(`MORNING READ: WAITING since ${dp.called_at.slice(11, 16)} UTC${dp.price_at_call ? ` (spot ${dp.price_at_call})` : ""} — he showed up on time but price had not shown its hand; daily structure ${trend}. Scenarios he wrote: BULLISH if "${(dp.scenario_bull ?? "").slice(0, 140)}"; BEARISH if "${(dp.scenario_bear ?? "").slice(0, 140)}". Until he calls it there is NO direction and NO trade. If he reports a trade before calling the read, say so: a trade before the call is a trade without a read`);
+      } else if (dp.called_at && isReadCall(dp.bias)) {
+        const trend = READ_TRENDS.find((option) => option.id === dp.trend)?.label ?? "structure not named";
+        const showedUp = dp.waited_from ? ` (showed up ${dp.waited_from.slice(11, 16)} UTC and WAITED; called it when price showed its hand${dp.resolution_note ? `: "${dp.resolution_note.slice(0, 120)}"` : ""})` : "";
+        p.push(`MORNING READ locked at ${dp.called_at.slice(11, 16)} UTC${dp.price_at_call ? ` with spot ${dp.price_at_call}` : ""}${showedUp}: ${dp.bias === "no_trade" ? "NO TRADE (choppy / no edge)" : dp.bias!.toUpperCase()} — daily structure ${trend}`);
         if (dp.invalidation_price) {
           const { price } = await spotPrice(env);
           if (lineCrossed(dp.bias, dp.invalidation_price, price)) {
@@ -311,7 +315,7 @@ export async function traderContext(env: Env): Promise<string> {
     ).all<Pick<DayPlan, "date" | "result" | "invalidated">>();
     const card = summarizeReads(history.results);
     if (card.scored) {
-      dayPlanLine += `\nMorning-read scorecard (last ${card.scored} graded days): ${card.right} right, ${card.wrong} wrong, ${card.flat} flat${card.pct !== null ? ` → ${card.pct}% of decided reads right` : ""}; his line was crossed on ${card.invalidated} of them${card.streak ? `; current streak ${card.streak.length} ${card.streak.result}` : ""}. Grade the READ, not the P&L: sitting out a choppy day he called choppy is a correct read.`;
+      dayPlanLine += `\nMorning-read scorecard (last ${card.scored} graded days): ${card.right} right, ${card.wrong} wrong, ${card.flat} flat${card.waited ? `, ${card.waited} waited (showed up, never called it)` : ""}${card.pct !== null ? ` → ${card.pct}% of decided reads right` : ""}; his line was crossed on ${card.invalidated} of them${card.streak ? `; current streak ${card.streak.length} ${card.streak.result}` : ""}. Grade the READ, not the P&L: sitting out a choppy day he called choppy is a correct read.`;
     }
   } catch {
     // table may not exist yet
@@ -362,7 +366,7 @@ Judge TODAY strictly from this account's section. Never attribute another accoun
 
 HIS CURRENT CONTRACT (LIVE — the numbers come from his profile and OVERRIDE any older version you remember):
 1. The account's job is REPS, not compounding. Success = rule-compliant trades; balance is irrelevant.
-2. Plan BEFORE entry, every time: bias, direction (must not contradict the bias), playbook setup, the three things he must see, and the invalidation price are written and saved before the order. No plan, no trade. An entry logged without a prior plan is a rule break even if it wins. No trade is owed to the market. Place broker protection as required by the trading plan; TradeMate does not place broker orders. The MORNING READ is locked before the session and names the daily structure, one call (bullish / bearish / no trade) and the price that proves it wrong — written from price only, never from news. He trades only in the direction of his read; if his line is crossed the read is dead and he may only trade the new direction with a fresh plan. A no-trade call on a choppy day that he then sits out is a WIN.
+2. Plan BEFORE entry, every time: bias, direction (must not contradict the bias), playbook setup, the three things he must see, and the invalidation price are written and saved before the order. No plan, no trade. An entry logged without a prior plan is a rule break even if it wins. No trade is owed to the market. Place broker protection as required by the trading plan; TradeMate does not place broker orders. The MORNING READ is locked before the session and names the daily structure, one call (bullish / bearish / no trade / WAITING with both scenarios written) and the price that proves it wrong — written from price only, never from news. A WAITING read is honest when price has not shown its hand yet: he is credited for showing up, but the day has no direction until he calls it, and a waiting read that is never called scores as "waited", not right. He trades only in the direction of his read; if his line is crossed the read is dead and he may only trade the new direction with a fresh plan. A no-trade call on a choppy day that he then sits out is a WIN.
 3. MAX ${profile.max_trades_per_day} trade(s) per day — this number is his CURRENT rule.${Number(profile.max_trades_per_day) === 1 ? " One loss = done for the day." : ""}
 4. THE A+ GATE (his own, Oct 2026): ${GATE_LINES.map((line) => `${line.n} ${line.label}`).join("; ")}. A trade shows gate:A+ 7/7 or gate:Half-setup n/7 with the missing line numbers. 7/7 is the only trade he agreed to take; a half-setup belongs in the Notebook as a shadow, not in the market. Judge a trade by its gate, never by its P&L — a half-setup that paid is still the most expensive trade he can take. Lines 1-3 are his own word; call it out if the feeling note or reason contradicts them.
 5. SL moves to break-even ONLY after a new structure point confirms beyond entry on a 15-MINUTE CLOSE — never from fear, never on a wick.

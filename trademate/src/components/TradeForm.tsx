@@ -210,7 +210,7 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
 
   const readCrossed = dayPlan ? lineCrossed(dayPlan.bias, dayPlan.invalidation_price, spot) : false;
   const readConflict = !existing && dayPlan?.called_at && direction && !readCrossed && (
-    (dayPlan.bias === "bullish" && direction === "short") || (dayPlan.bias === "bearish" && direction === "long") || dayPlan.bias === "no_trade"
+    (dayPlan.bias === "bullish" && direction === "short") || (dayPlan.bias === "bearish" && direction === "long") || dayPlan.bias === "no_trade" || dayPlan.bias === "waiting"
   );
 
   function toggleEmotion(id: string) {
@@ -380,7 +380,9 @@ function FormInner({ onClose, existing, prefill, closeMode, lockedPlan, unplanne
         <p role="alert" className="rounded-xl border border-down/40 bg-down/10 p-3 text-xs font-semibold text-down">
           {dayPlan?.bias === "no_trade"
             ? "Your morning read said NO TRADE today. Sitting out was the trade. If you enter anyway, the day is a rule break by your own call."
-            : `Your morning read is ${dayPlan?.bias?.toUpperCase()} and your line (${dayPlan?.invalidation_price ?? "—"}) has not been crossed. A ${direction} here is the narrative talking, not the chart.`}
+            : dayPlan?.bias === "waiting"
+              ? "Your morning read is still WAITING — by your own account price hasn't shown its hand. Call the read first. A trade before the call is a trade without a read."
+              : `Your morning read is ${dayPlan?.bias?.toUpperCase()} and your line (${dayPlan?.invalidation_price ?? "—"}) has not been crossed. A ${direction} here is the narrative talking, not the chart.`}
         </p>
       )}
       {!existing && dayPlan?.called_at && readCrossed && (
