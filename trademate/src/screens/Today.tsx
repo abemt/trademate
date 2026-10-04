@@ -567,25 +567,22 @@ export function Today() {
     <div className="space-y-4">
       <Greeting now={now} />
       <DashboardStats />
-      <div className="space-y-4 lg:grid lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start lg:gap-4 lg:space-y-0">
-        <div className="space-y-4">
-          <RecentTrades />
-          <BriefingCard />
-          <NewsWatchCard />
-          <RiskCalc />
-          {isProp && <PropGuard />}
-        </div>
-        <div className="space-y-4">
-          <CircuitBreakerCard />
-          <DayPlanCard />
-          <RoutineCard />
-          <DayStructureCard />
-          <CheckinCard />
-          <TradeTokens />
-          <UrgeLogCard />
-          <SessionClock now={now} />
-          <DisciplineCard />
-        </div>
+      {/* Cards flow into height-balanced columns (2 on lg, 3 on xl) so no column runs long while another sits empty. */}
+      <div className="space-y-4 lg:columns-2 lg:gap-4 lg:space-y-0 lg:[&>*]:mb-4 lg:[&>*]:break-inside-avoid xl:columns-3">
+        <RecentTrades />
+        <DayPlanCard />
+        <TradeTokens />
+        <CircuitBreakerCard />
+        <BriefingCard />
+        <RoutineCard />
+        <DayStructureCard />
+        <CheckinCard />
+        <NewsWatchCard />
+        <UrgeLogCard />
+        <RiskCalc />
+        <SessionClock now={now} />
+        <DisciplineCard />
+        {isProp && <PropGuard />}
       </div>
     </div>
   );

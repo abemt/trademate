@@ -1186,8 +1186,8 @@ export function Stats() {
 
       <MonthCalendar trades={trades} maxPerDay={maxPerDay} />
 
-      <div className="space-y-4 lg:grid lg:grid-cols-2 lg:items-start lg:gap-4 lg:space-y-0">
-      <div className="space-y-4">
+      {/* Cards flow into height-balanced columns (2 on lg, 3 on xl) instead of two fixed stacks. */}
+      <div className="space-y-4 lg:columns-2 lg:gap-4 lg:space-y-0 lg:[&>*]:mb-4 lg:[&>*]:break-inside-avoid xl:columns-3">
       <Card title="Equity curve" icon={<IconTrendUp />} badge="cumulative $">
         {s.equity.length > 2 ? (
           <EquityCurve points={s.equity} />
@@ -1196,21 +1196,19 @@ export function Stats() {
         )}
       </Card>
 
-      <MonthlyProgress trades={trades} />
-
-      <WeeklyReviewCard />
-      </div>
-
-      <div className="space-y-4">
       <DisciplineTriangle trades={trades} maxPerDay={maxPerDay} />
+
+      <GateCard trades={trades} />
 
       <NervousSystemCard trades={trades} />
 
-      <GateCard trades={trades} />
+      <MonthlyProgress trades={trades} />
 
       <MistakesCostCard trades={trades} />
 
       <EntryHourCard trades={trades} timezone={timezone} />
+
+      <WeeklyReviewCard />
 
       <PlanPerformanceCard trades={trades} />
 
@@ -1267,7 +1265,6 @@ export function Stats() {
           </div>
         </Card>
       )}
-      </div>
       </div>
     </div>
   );
