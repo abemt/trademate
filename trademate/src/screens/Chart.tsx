@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Card } from "../components/Card";
 import { Chip, ChipRow, FieldLabel } from "../components/Chip";
 import { IconCandles, IconX } from "../components/Icons";
+import { RiskCalc, SessionClock, useNow } from "../components/MarketCards";
+import { BriefingCard, NewsWatchCard } from "../components/TodayCards";
 import { api } from "../lib/api";
 import { TIMEFRAMES } from "../lib/trades";
 
@@ -15,6 +17,7 @@ interface Zone {
 }
 
 export function Chart() {
+  const now = useNow();
   const tvTheme = document.documentElement.dataset.theme === "light" ? "light" : "dark";
   const [zones, setZones] = useState<Zone[]>([]);
   const [kind, setKind] = useState<"support" | "resistance">("support");
@@ -84,7 +87,7 @@ export function Chart() {
       <div className="px-1">
         <h1 className="text-2xl font-bold text-white">Chart</h1>
         <p className="mt-1 text-sm text-ink-300">
-          Live XAUUSD. Save your zones below — Mate uses them in briefings and setup reviews.
+          Live XAUUSD, your zones, the briefing, the news watch and the session clock — the market side in one place.
         </p>
       </div>
 
@@ -195,6 +198,13 @@ export function Chart() {
           </ul>
         )}
       </Card>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <BriefingCard />
+        <NewsWatchCard />
+        <SessionClock now={now} />
+        <RiskCalc />
+      </div>
     </div>
   );
 }

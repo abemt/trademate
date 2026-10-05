@@ -8,10 +8,12 @@ import {
   IconHome,
   IconJournal,
   IconStats,
+  IconSun,
 } from "./Icons";
 
 const META: Record<Tab, { label: string; icon: typeof IconHome }> = {
   today: { label: "Today", icon: IconHome },
+  life: { label: "Life", icon: IconSun },
   analyze: { label: "Analyze", icon: IconCrosshair },
   chart: { label: "Chart", icon: IconCandles },
   mate: { label: "Mate", icon: IconChat },

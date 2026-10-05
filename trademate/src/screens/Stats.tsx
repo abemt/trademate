@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card } from "../components/Card";
-import { EquityCurve } from "../components/EquityCurve";
+import { DashboardStats } from "../components/DashboardStats";
 import { type Plan } from "../components/PlansSheet";
 import {
   IconClock,
@@ -126,34 +126,6 @@ function EntryHourCard({ trades, timezone }: { trades: Trade[]; timezone: string
         </ul>
       )}
     </Card>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  tone,
-  pct,
-}: {
-  label: string;
-  value: string;
-  tone?: "up" | "down";
-  pct?: number | null;
-}) {
-  const color = tone === "up" ? "text-up" : tone === "down" ? "text-down" : "text-white";
-  return (
-    <div className="rounded-2xl border border-white/5 bg-ink-900/90 p-3.5 text-center shadow-[var(--card-shadow)]">
-      <p className="text-[10px] uppercase tracking-wider text-ink-400">{label}</p>
-      <p className={`mt-1 text-xl font-bold ${color}`}>{value}</p>
-      {pct !== undefined && pct !== null && (
-        <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-ink-700">
-          <div
-            className="h-full rounded-full bg-gold-500"
-            style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
-          />
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -1152,6 +1124,7 @@ export function Stats() {
   }
 
   const worstEmotions = [...s.byEmotion].sort((a, b) => a.netR - b.netR);
+  const sectionTitle = "px-1 pt-2 text-[11px] font-bold uppercase tracking-wider text-ink-400";
 
   return (
     <div className="space-y-4">
@@ -1161,111 +1134,91 @@ export function Stats() {
           {s.closedCount} closed trade{s.closedCount === 1 ? "" : "s"} across {s.tradeDays} day
           {s.tradeDays === 1 ? "" : "s"}
           {active ? <> · <span className="font-semibold text-gold-500">{active.label}</span></> : null}
+          {" · "}{s.openCount} open
         </p>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 lg:grid-cols-6">
-        <StatCard
-          label="Net P&L"
-          value={fmtUsd(s.netUsd)}
-          tone={s.netUsd > 0 ? "up" : s.netUsd < 0 ? "down" : undefined}
-        />
-        <StatCard
-          label="Net R"
-          value={fmtR(s.netR)}
-          tone={s.netR > 0 ? "up" : s.netR < 0 ? "down" : undefined}
-        />
-        <StatCard label="Win rate" value={s.winRate !== null ? `${s.winRate}%` : "—"} pct={s.winRate} />
-        <StatCard label="Avg R" value={s.avgR !== null ? fmtR(s.avgR) : "—"} />
-        <StatCard
-          label="Profit factor"
-          value={s.profitFactor !== null ? s.profitFactor.toFixed(2) : "—"}
-        />
-        <StatCard label="Open now" value={String(s.openCount)} />
-      </div>
+      {/* Numbers, one block: range, KPIs and the equity curve. */}
+      <DashboardStats />
 
       <MonthCalendar trades={trades} maxPerDay={maxPerDay} />
 
-      {/* Standard dashboard grid: rows fill left to right, cards in a row share a height. */}
+      {/* Process first — the cards that decide whether the edge survives. */}
+      <h2 className={sectionTitle}>Process</h2>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
-      <Card title="Equity curve" icon={<IconTrendUp />} badge="cumulative $">
-        {s.equity.length > 2 ? (
-          <EquityCurve points={s.equity} />
-        ) : (
-          <p className="text-sm text-ink-300">A couple more closed trades and the curve appears.</p>
-        )}
-      </Card>
-
-      <DisciplineTriangle trades={trades} maxPerDay={maxPerDay} />
-
-      <NervousSystemCard trades={trades} />
-
-      <GateCard trades={trades} />
-
-      <MistakesCostCard trades={trades} />
-
-      <EntryHourCard trades={trades} timezone={timezone} />
-
-      <MonthlyProgress trades={trades} />
-
-      <WeeklyReviewCard />
-
-      <PlanPerformanceCard trades={trades} />
-
-      <Card title="Discipline" icon={<IconGauge />}>
-        <ul className="space-y-2 text-sm">
-          <li className="flex justify-between">
-            <span className="text-ink-300">Days over your {maxPerDay}-trade rule</span>
-            <span className={`font-bold ${s.overRuleDays > 0 ? "text-down" : "text-up"}`}>
-              {s.overRuleDays}
-            </span>
-          </li>
-          <li className="flex justify-between">
-            <span className="text-ink-300">Plan followed</span>
-            <span className="font-bold text-white">
-              {s.planFollowedPct !== null ? `${s.planFollowedPct}%` : "—"}
-            </span>
-          </li>
-          <li className="flex justify-between">
-            <span className="text-ink-300">Trades per day</span>
-            <span className="font-bold text-white">
-              {(trades.length / Math.max(1, s.tradeDays)).toFixed(1)}
-            </span>
-          </li>
-        </ul>
-      </Card>
-
-      {s.bySetup.length > 0 && (
-        <Card title="By setup" icon={<IconStats />}>
-          <BreakdownRows rows={s.bySetup} />
-        </Card>
-      )}
-
-      {s.bySession.length > 0 && (
-        <Card title="By session" icon={<IconStats />}>
-          <BreakdownRows rows={s.bySession} />
-        </Card>
-      )}
-
-      {worstEmotions.length > 0 && (
-        <Card title="Emotions vs results" icon={<IconStats />} badge="net R when tagged">
-          <div className="flex flex-wrap gap-2">
-            {worstEmotions.map((e) => (
-              <span
-                key={e.id}
-                className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
-                  e.netR < 0
-                    ? "border-down/40 bg-down/10 text-down"
-                    : "border-up/40 bg-up/10 text-up"
-                }`}
-              >
-                {e.label} {fmtR(e.netR)} · {e.n}
+        <GateCard trades={trades} />
+        <MistakesCostCard trades={trades} />
+        <EntryHourCard trades={trades} timezone={timezone} />
+        <DisciplineTriangle trades={trades} maxPerDay={maxPerDay} />
+        <NervousSystemCard trades={trades} />
+        <Card title="Discipline" icon={<IconGauge />}>
+          <ul className="space-y-2 text-sm">
+            <li className="flex justify-between">
+              <span className="text-ink-300">Days over your {maxPerDay}-trade rule</span>
+              <span className={`font-bold ${s.overRuleDays > 0 ? "text-down" : "text-up"}`}>
+                {s.overRuleDays}
               </span>
-            ))}
-          </div>
+            </li>
+            <li className="flex justify-between">
+              <span className="text-ink-300">Plan followed</span>
+              <span className="font-bold text-white">
+                {s.planFollowedPct !== null ? `${s.planFollowedPct}%` : "—"}
+              </span>
+            </li>
+            <li className="flex justify-between">
+              <span className="text-ink-300">Trades per day</span>
+              <span className="font-bold text-white">
+                {(trades.length / Math.max(1, s.tradeDays)).toFixed(1)}
+              </span>
+            </li>
+          </ul>
         </Card>
-      )}
       </div>
+
+      <h2 className={sectionTitle}>Performance</h2>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+        <MonthlyProgress trades={trades} />
+        <WeeklyReviewCard />
+        <PlanPerformanceCard trades={trades} />
+      </div>
+
+      {/* The long tail stays one click away instead of on the page. */}
+      <details className="group rounded-2xl border border-white/5 bg-ink-900/60">
+        <summary className="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-ink-300 transition hover:text-white">
+          More breakdowns <span className="text-ink-500">· by setup, by session, emotions</span>
+          <span className="float-right text-ink-500 transition group-open:rotate-180">⌄</span>
+        </summary>
+        <div className="grid grid-cols-1 gap-4 p-4 pt-1 lg:grid-cols-2 xl:grid-cols-3">
+          {s.bySetup.length > 0 && (
+            <Card title="By setup" icon={<IconStats />}>
+              <BreakdownRows rows={s.bySetup} />
+            </Card>
+          )}
+          {s.bySession.length > 0 && (
+            <Card title="By session" icon={<IconStats />}>
+              <BreakdownRows rows={s.bySession} />
+            </Card>
+          )}
+          {worstEmotions.length > 0 && (
+            <Card title="Emotions vs results" icon={<IconStats />} badge="net R when tagged">
+              <div className="flex flex-wrap gap-2">
+                {worstEmotions.map((e) => (
+                  <span
+                    key={e.id}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                      e.netR < 0
+                        ? "border-down/40 bg-down/10 text-down"
+                        : "border-up/40 bg-up/10 text-up"
+                    }`}
+                  >
+                    {e.label} {fmtR(e.netR)} · {e.n}
+                  </span>
+                ))}
+              </div>
+            </Card>
+          )}
+        </div>
+      </details>
     </div>
   );
 }

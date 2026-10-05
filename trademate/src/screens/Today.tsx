@@ -1,26 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { motion } from "framer-motion";
 import { Card } from "../components/Card";
 import { SitOutControl } from "../components/EntryGate";
-import { UrgeLogCard } from "../components/UrgeCatch";
-import { DayStructureCard } from "../components/DayStructureCard";
+import { useNow } from "../components/MarketCards";
 import { tradingDate } from "../../shared/entryGate";
 import {
-  IconClock,
   IconCoin,
   IconGauge,
   IconPlus,
-  IconShield,
   IconTrendDown,
   IconTrendUp,
 } from "../components/Icons";
 import {
-  BriefingCard,
-  CheckinCard,
   CircuitBreakerCard,
   DayPlanCard,
-  DisciplineCard,
-  NewsWatchCard,
   RoutineCard,
 } from "../components/TodayCards";
 import { useApp } from "../lib/store";
@@ -28,28 +21,15 @@ import {
   SETUPS,
   accountTrades,
   computeStats,
-  currentBalance,
   fmtR,
   fmtUsd,
   optionLabel,
 } from "../lib/trades";
-import { EquityCurve } from "../components/EquityCurve";
-import { RiskInput, riskPctOf } from "../components/RiskInput";
 import {
   SESSIONS,
   formatCountdown,
-  localTimeOfUtcHour,
   sessionStatus,
 } from "../lib/sessions";
-
-function useNow(intervalMs = 30_000): Date {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), intervalMs);
-    return () => clearInterval(id);
-  }, [intervalMs]);
-  return now;
-}
 
 function Greeting({ now }: { now: Date }) {
   const name = useApp((s) => s.profile?.trader_name);
@@ -74,51 +54,6 @@ function Greeting({ now }: { now: Date }) {
         </span>
       )}
     </div>
-  );
-}
-
-function SessionClock({ now }: { now: Date }) {
-  return (
-    <Card title="Sessions" icon={<IconClock />}>
-      <ul className="space-y-2.5">
-        {SESSIONS.map((s) => {
-          const st = sessionStatus(s, now);
-          return (
-            <li
-              key={s.name}
-              className="flex items-center gap-3 rounded-xl border border-white/5 bg-ink-800/70 px-3 py-2.5"
-            >
-              <span className="relative flex h-2.5 w-2.5">
-                {st.open && (
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-up opacity-60" />
-                )}
-                <span
-                  className={`relative inline-flex h-2.5 w-2.5 rounded-full ${
-                    st.open ? "bg-up" : "bg-ink-600"
-                  }`}
-                />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="flex items-center gap-2 text-sm font-medium text-white">
-                  {s.name}
-                  {s.prime && (
-                    <span className="rounded-full bg-gold-500/15 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider text-gold-300">
-                      prime time
-                    </span>
-                  )}
-                </p>
-                <p className="text-xs text-ink-400">
-                  {localTimeOfUtcHour(s.startUtc)} – {localTimeOfUtcHour(s.endUtc)} your time
-                </p>
-              </div>
-              <p className={`text-xs font-medium ${st.open ? "text-up" : "text-ink-300"}`}>
-                {st.open ? `closes in ${formatCountdown(st.until, now)}` : `in ${formatCountdown(st.until, now)}`}
-              </p>
-            </li>
-          );
-        })}
-      </ul>
-    </Card>
   );
 }
 
@@ -191,223 +126,6 @@ function TradeTokens() {
         <IconPlus className="h-4.5 w-4.5" /> Log a trade
       </motion.button>
       <SitOutControl />
-    </Card>
-  );
-}
-
-const RANGES = [
-  { id: "1d", label: "Today", days: 1 },
-  { id: "7d", label: "7D", days: 7 },
-  { id: "30d", label: "30D", days: 30 },
-  { id: "90d", label: "90D", days: 90 },
-  { id: "all", label: "ALL", days: null as number | null },
-] as const;
-
-function PFRing({ pf }: { pf: number | null }) {
-  const frac = pf === null ? 0 : Math.min(1, pf / 3);
-  const C = 2 * Math.PI * 14;
-  return (
-    <svg viewBox="0 0 36 36" className="h-8 w-8 -rotate-90">
-      <circle cx="18" cy="18" r="14" fill="none" stroke="var(--color-ink-700)" strokeWidth="4" />
-      <circle
-        cx="18"
-        cy="18"
-        r="14"
-        fill="none"
-        stroke={pf !== null && pf >= 1 ? "var(--color-up)" : "var(--color-down)"}
-        strokeWidth="4"
-        strokeLinecap="round"
-        strokeDasharray={`${(C * frac).toFixed(1)} ${C.toFixed(1)}`}
-      />
-    </svg>
-  );
-}
-
-function KpiTile({
-  label,
-  value,
-  tone,
-  extra,
-}: {
-  label: string;
-  value: string;
-  tone?: "up" | "down";
-  extra?: React.ReactNode;
-}) {
-  const color = tone === "up" ? "text-up" : tone === "down" ? "text-down" : "text-white";
-  return (
-    <div className="flex items-center justify-between gap-2 rounded-2xl border border-white/5 bg-ink-900/90 px-3.5 py-3 shadow-[var(--card-shadow)]">
-      <div className="min-w-0">
-        <p className="text-[9px] uppercase tracking-wider text-ink-400">{label}</p>
-        <p className={`truncate text-lg font-bold ${color}`}>{value}</p>
-      </div>
-      {extra}
-    </div>
-  );
-}
-
-function DashboardStats() {
-  const profile = useApp((s) => s.profile);
-  const allTrades = useApp((s) => s.trades);
-  const accounts = useApp((s) => s.accounts);
-  const active = accounts.find((a) => a.active === 1 && a.archived === 0) ?? null;
-  const acctTrades = useMemo(
-    () => accountTrades(allTrades, active?.id ?? null),
-    [allTrades, active?.id],
-  );
-  const [range, setRange] = useState<string>("30d");
-  const days = RANGES.find((r) => r.id === range)?.days ?? null;
-  const ranged = useMemo(() => {
-    if (days === null) return acctTrades;
-    const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
-    return acctTrades.filter((t) => (t.closed_at ?? t.opened_at) >= cutoff);
-  }, [acctTrades, days]);
-  const maxPerDay = profile?.max_trades_per_day ?? 2;
-  const s = useMemo(() => computeStats(ranged, maxPerDay), [ranged, maxPerDay]);
-  const balance = currentBalance(
-    active?.starting_balance ?? profile?.account_size ?? 0,
-    acctTrades,
-  );
-
-  // Dated cumulative curve for the selected range.
-  const { curvePts, curveLabels } = useMemo(() => {
-    const closed = ranged
-      .filter((t) => !t.deleted && t.status === "closed" && t.pnl_usd !== null)
-      .sort((a, b) => (a.closed_at ?? a.opened_at).localeCompare(b.closed_at ?? b.opened_at));
-    let run = 0;
-    const pts: number[] = [];
-    const lbls: string[] = [];
-    for (const t of closed) {
-      run += t.pnl_usd ?? 0;
-      pts.push(Math.round(run * 100) / 100);
-      lbls.push(
-        new Date(t.closed_at ?? t.opened_at).toLocaleDateString(undefined, {
-          month: "short",
-          day: "numeric",
-        }),
-      );
-    }
-    return { curvePts: pts, curveLabels: lbls };
-  }, [ranged]);
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-1.5 overflow-x-auto">
-        <span className="mr-auto text-[10px] font-semibold uppercase tracking-wider text-ink-400">
-          {active?.label ?? "Account"}
-        </span>
-        {RANGES.map((r) => (
-          <button
-            key={r.id}
-            type="button"
-            onClick={() => setRange(r.id)}
-            className={`rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${
-              range === r.id
-                ? "bg-gold-500 text-ink-950"
-                : "border border-white/10 bg-ink-800 text-ink-400 hover:text-ink-200"
-            }`}
-          >
-            {r.label}
-          </button>
-        ))}
-      </div>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-        <KpiTile label="Account balance" value={`$${balance.toLocaleString(undefined, { maximumFractionDigits: 2 })}`} />
-        <KpiTile
-          label="Closed net P&L"
-          value={fmtUsd(s.netUsd)}
-          tone={s.netUsd > 0 ? "up" : s.netUsd < 0 ? "down" : undefined}
-        />
-        <KpiTile label="Win rate" value={s.winRate !== null ? `${s.winRate}%` : "—"} />
-        <KpiTile
-          label="Avg R / trade"
-          value={s.avgR !== null ? fmtR(s.avgR) : "—"}
-          tone={s.avgR !== null ? (s.avgR > 0 ? "up" : "down") : undefined}
-        />
-        <KpiTile
-          label="Profit factor"
-          value={s.profitFactor !== null ? s.profitFactor.toFixed(2) : "—"}
-          extra={<PFRing pf={s.profitFactor} />}
-        />
-      </div>
-      <Card title="Equity" icon={<IconGauge />} badge={`cumulative $ · ${RANGES.find((r) => r.id === range)?.label}`}>
-        {curvePts.length > 2 ? (
-          <EquityCurve points={curvePts} labels={curveLabels} />
-        ) : (
-          <p className="py-4 text-center text-sm text-ink-400">
-            Close a few trades in this range and the curve draws itself.
-          </p>
-        )}
-      </Card>
-    </div>
-  );
-}
-
-function RiskCalc() {
-  const profile = useApp((s) => s.profile);
-  const trades = useApp((s) => s.trades);
-  const accounts = useApp((s) => s.accounts);
-  const active = accounts.find((a) => a.active === 1 && a.archived === 0) ?? null;
-  // Risk is a share of the ACCOUNT SIZE, not the drifting live balance: 1% of a $10k eval is $100.
-  const accountSize = active?.starting_balance ?? profile?.account_size ?? 10_000;
-  const liveBalance = currentBalance(accountSize, accountTrades(trades, active?.id ?? null));
-  const [riskUsd, setRiskUsd] = useState(() => (accountSize * (profile?.risk_pct_min ?? 0.5)) / 100);
-  const [slPips, setSlPips] = useState(75);
-  // Accounts arrive after first paint; re-seed the default once the real account size is known.
-  useEffect(() => { setRiskUsd((accountSize * (profile?.risk_pct_min ?? 0.5)) / 100); }, [accountSize, profile?.risk_pct_min]);
-
-  const riskPct = riskPctOf(riskUsd, accountSize);
-  const idealLots = Math.floor((riskUsd / (slPips * 10)) * 100) / 100; // XAUUSD: $10/pip per lot
-  const belowMin = idealLots < 0.01;
-  // Broker minimum is 0.01 lots — on tiny accounts that IS the position, so show its real risk.
-  const minLotRiskUsd = 0.01 * slPips * 10;
-  const minLotRiskPct = accountSize > 0 ? (minLotRiskUsd / accountSize) * 100 : 0;
-
-  return (
-    <Card title="Risk Guard" icon={<IconShield />} badge={active?.label ?? profile?.account_label ?? "account"}>
-      <RiskInput base={accountSize} riskUsd={riskUsd} onChange={setRiskUsd} className="mb-2" />
-      <p className="mb-3 text-xs text-ink-400">
-        {riskPct}% of the ${accountSize.toLocaleString(undefined, { maximumFractionDigits: 0 })} account size
-        {Math.round(liveBalance) !== Math.round(accountSize) ? ` · live balance $${liveBalance.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : ""}
-      </p>
-
-      <label className="block text-xs text-ink-300">
-        Stop loss: <span className="font-semibold text-white">{slPips} pips</span>
-        <input
-          type="range"
-          min={20}
-          max={150}
-          step={5}
-          value={slPips}
-          onChange={(e) => setSlPips(Number(e.target.value))}
-          className="mt-1.5 w-full accent-(--color-gold-400)"
-        />
-      </label>
-
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <div className="rounded-xl bg-ink-800/70 p-3 text-center">
-          <p className="text-[10px] uppercase tracking-wider text-ink-400">Position size</p>
-          <p className={`text-xl font-bold ${belowMin ? "text-down" : "text-gold-300"}`}>
-            {belowMin ? "0.01*" : idealLots.toFixed(2)} lots
-          </p>
-        </div>
-        <div className="rounded-xl bg-ink-800/70 p-3 text-center">
-          <p className="text-[10px] uppercase tracking-wider text-ink-400">
-            {belowMin ? "Real risk at 0.01" : "Risk"}
-          </p>
-          <p className={`text-xl font-bold ${belowMin ? "text-down" : "text-white"}`}>
-            ${belowMin ? minLotRiskUsd.toFixed(0) : riskUsd.toFixed(2)}
-          </p>
-        </div>
-      </div>
-      {belowMin && (
-        <p className="mt-2 rounded-xl border border-down/30 bg-down/5 p-2.5 text-xs leading-relaxed text-down">
-          *This account is below minimum operating size: {riskPct}% risk would need{" "}
-          {idealLots.toFixed(3)} lots, but the broker minimum 0.01 risks ${minLotRiskUsd.toFixed(0)} ={" "}
-          {minLotRiskPct.toFixed(0)}% of the account at this stop. There is no compliant size — that's
-          math, not opinion. Per your contract: this account buys reps, not growth.
-        </p>
-      )}
     </Card>
   );
 }
@@ -566,27 +284,15 @@ export function Today() {
   return (
     <div className="space-y-4">
       <Greeting now={now} />
-      <DashboardStats />
-      {/* Standard dashboard grid: rows fill left to right, cards in a row share a height. */}
+      {/* The cockpit: only what a trading day needs. Market context lives on Chart, the life side on Life, numbers on Stats. */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
         <DayPlanCard />
         <TradeTokens />
-        <div className="flex flex-col lg:row-span-2 [&>section]:flex-1">
-          <DayStructureCard />
-        </div>
-        <RecentTrades />
-        <UrgeLogCard />
-        <RoutineCard />
-        <CheckinCard />
-        <RiskCalc />
-        <BriefingCard />
-        <NewsWatchCard />
-        <DisciplineCard />
-        {/* Guardrails lead on the phone; on desktop they sit with the other short status cards. */}
         <div className="order-first flex flex-col lg:order-none [&>section]:flex-1">
           <CircuitBreakerCard />
         </div>
-        <SessionClock now={now} />
+        <RecentTrades />
+        <RoutineCard />
         {isProp && <PropGuard />}
       </div>
     </div>

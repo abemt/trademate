@@ -52,7 +52,7 @@ export interface Profile {
   weaknesses: string;
 }
 
-export const TABS = ["today", "analyze", "chart", "mate", "journal", "stats"] as const;
+export const TABS = ["today", "life", "analyze", "chart", "mate", "journal", "stats"] as const;
 export type Tab = (typeof TABS)[number];
 
 type AuthState = "checking" | "locked" | "authed" | "offline";

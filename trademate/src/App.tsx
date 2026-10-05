@@ -10,6 +10,7 @@ import { applyTheme, currentTheme, type Theme } from "./lib/theme";
 import { Analyze } from "./screens/Analyze";
 import { Chart } from "./screens/Chart";
 import { Journal } from "./screens/Journal";
+import { Life } from "./screens/Life";
 import { Mate } from "./screens/Mate";
 import { Stats } from "./screens/Stats";
 import { Today } from "./screens/Today";
@@ -86,6 +87,8 @@ function Shell() {
           <div key={tab} className={`animate-enter mx-auto w-full max-w-lg lg:max-w-[1440px] ${chat ? "flex min-h-0 flex-1 flex-col" : ""}`}>
             {tab === "today" ? (
               <Today />
+            ) : tab === "life" ? (
+              <Life />
             ) : tab === "journal" ? (
               <Journal />
             ) : tab === "stats" ? (
